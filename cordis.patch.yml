@@ -1,0 +1,26 @@
+# dsh bundle layer: mount the dsh-agent-swarm plugin.
+#
+# Plugin row config (all keys optional; defaults shown):
+#   maxConcurrency: <int>=1>      hard cap on concurrent subtasks (default: unlimited)
+#   timeoutMs: <int>=0>          per-subtask timeout; 0 = none (default: 7200000)
+#   provider: <string>           subtask provider route (default: deepseek-official)
+#   model: <string>              subtask model id (default: deepseek-flash)
+#   maxTokens: <int>=1>          per-request token cap (default: unset)
+#   maxBodyChars: <int>=1>       truncate each result body in the summary (default: verbatim)
+#   rampLimit: <int>=1>          first-wave concurrency (default: 5)
+#   rampIntervalMs: <int>=0>     interval between later launches (default: 700)
+#   retryableFailureCodes: [..]  host failure codes that requeue (default: RATE_LIMIT, QUOTA)
+#   maxPromptChars: <int>=1>     cap on one expanded prompt (default: no cap)
+#   maxAttempts: <int>=1>        attempt budget per subtask (default: unbounded)
+#   backoffJitterMs: <int>=0>    backoff jitter ceiling; 0 = none (default: 0)
+#   toolTimeoutMs: <int>=1>      whole-batch tool timeout (default: 4h)
+#   systemPrompt: <string>       subtask system prompt (default: built-in)
+#   progressLog: <bool>          log each settled subtask (default: false)
+#   subagentProvider: <string>   path B: run subtasks as host subagents via this provider
+#                                (e.g. 'spawn' / 'fork'); default: path A (one-shot LLM)
+#   followSessionModel: <bool>   subtasks follow the calling agent's provider/model (default: false)
+#   resumeEnabled: <bool>        path B only: continuable children resumable via an item's
+#                                reserved `agent` key (default: false)
+- insert:
+    - id: agent-swarm
+      name: dsh-agent-swarm

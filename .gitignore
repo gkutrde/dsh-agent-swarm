@@ -1,0 +1,42 @@
+# Dependencies
+node_modules/
+.pnpm-store/
+
+# Build outputs (lib/ is checked in on purpose — it is the shipped artifact)
+dist/
+*.tsbuildinfo
+
+# OS & IDE
+.DS_Store
+Thumbs.db
+*.log
+.idea/
+.vscode/
+
+# Environment
+.env
+.env.local
+.env.*.local
+# Release artifacts (packed tarballs are published as GitHub releases, not committed)
+*.tgz
+
+# 内部工程档案(需求/架构决策/任务卡/TDD 记录)不随仓库发布;本地 Obsidian 库保留
+项目文档/
+
+# Internal / machine-specific material kept out of the public repository
+交接提示词.md
+# smoke/ 只公开 verify-*.ps1 与 README;开发期脚本(依赖本机路径/profile 状态)不入库
+smoke/a02-a03.ps1
+smoke/t104-t107.ps1
+smoke/t110-t113.ps1
+smoke/t115-structured.ps1
+smoke/t102-pathB.ps1
+smoke/t103-*.ps1
+smoke/triage-*.txt
+smoke/triage-run.ps1
+smoke/probe-resume.plugin.mjs
+smoke/probe-mount.patch.yml
+smoke/headless-mount.patch.yml
+smoke/t102-template.txt
+smoke/t103-tpl1.txt
+smoke/t103-tpl2.txt

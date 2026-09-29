@@ -1,0 +1,63 @@
+{
+  "name": "dsh-agent-swarm",
+  "version": "0.5.1",
+  "description": "DeepSeek Harness plugin: agent_swarm tool — fan out one prompt template over an item list to a swarm of subagents.",
+  "type": "module",
+  "main": "lib/index.js",
+  "exports": {
+    ".": "./lib/index.js",
+    "./package.json": "./package.json",
+    "./cordis.patch.yml": "./cordis.patch.yml"
+  },
+  "files": [
+    "lib",
+    "src",
+    "skills",
+    "cordis.patch.yml",
+    "README.md",
+    "LICENSE",
+    "CHANGELOG.md"
+  ],
+  "keywords": [
+    "deepseek",
+    "dsh",
+    "agent",
+    "swarm",
+    "cordis",
+    "plugin"
+  ],
+  "license": "MIT",
+  "author": "gkutrde",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/gkutrde/dsh-agent-swarm.git"
+  },
+  "homepage": "https://github.com/gkutrde/dsh-agent-swarm#readme",
+  "bugs": {
+    "url": "https://github.com/gkutrde/dsh-agent-swarm/issues"
+  },
+  "engines": {
+    "node": ">=20"
+  },
+  "dsh": {
+    "bundle": {
+      "patch": "./cordis.patch.yml"
+    }
+  },
+  "peerDependencies": {
+    "cordis": ">=4.0.0-rc <5"
+  },
+  "devDependencies": {
+    "@types/node": "^22.20.0",
+    "schemastery": "^3.18.0",
+    "cordis": ">=4.0.0-rc <5",
+    "tsdown": "0.22.2",
+    "typescript": "~5.7.2"
+  },
+  "scripts": {
+    "build": "tsdown",
+    "typecheck": "tsc --noEmit",
+    "test": "node --test",
+    "pack:check": "node scripts/check-pack.mjs"
+  }
+}
