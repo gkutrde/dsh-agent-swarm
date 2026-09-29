@@ -6,6 +6,7 @@ import {
   fenceFor,
   UNKNOWN_BODY,
   SWARM_HEADER_PREFIX,
+  swarmResultValue,
   RETRY_HINT,
 } from '../src/render.ts'
 import type { SwarmResultEntry } from '../src/scheduler.ts'
@@ -282,4 +283,14 @@ test('resumed=true:只有续跑的条目输出该标记', () => {
   const resumed = { ...base, task: { ...base.task, resumeAgentId: 'child-1' } }
   assert.equal(formatResultLine(resumed), '[#1] item=item-0 state=started outcome=completed resumed=true')
   assert.equal(formatResultLine(base).includes('resumed'), false)
+})
+
+// ─── T-124:失败原因进元数据行与结构化值 ───
+
+test('reason= 字段:失败条目输出原因,成功条目不输出', () => {
+  const failed = { ...entry({ index: 0 }), status: 'failed' as const, reason: 'timeout' as const }
+  assert.equal(formatResultLine(failed), '[#1] item=item-0 state=started outcome=failed reason=timeout')
+  const value = swarmResultValue([failed], 'T')
+  assert.equal(value.items[0].reason, 'timeout')
+  assert.equal('reason' in swarmResultValue([entry({ index: 0, result: 'ok' })], 'T').items[0], false)
 })

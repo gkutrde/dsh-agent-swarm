@@ -114,6 +114,7 @@ export const AGENT_SWARM_OUTPUT = {
             state: { type: 'string' },
             outcome: { type: 'string', description: 'completed | failed | aborted' },
             body: { type: 'string' },
+            reason: { type: 'string', description: 'Failure cause: timeout | empty-output | provider-error | attempts-exhausted | deadlock | aborted.' },
             stopReason: { type: 'string' },
             attempts: { type: 'integer' },
             throttled: { type: 'boolean' },

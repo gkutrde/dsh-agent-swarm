@@ -49,12 +49,26 @@ export interface SwarmCompletion {
   stopReason?: string
 }
 
+/** 失败原因分类(T-124):由执行层或调度器判定,供上层决定续跑/重跑/降级。 */
+export type SwarmFailureReason =
+  | 'timeout'
+  | 'empty-output'
+  | 'provider-error'
+  | 'aborted'
+  | 'max-tokens'
+  | 'refusal'
+  | 'attempts-exhausted'
+  | 'deadlock'
+  | 'failed'
+
 export interface SwarmAttemptError {
   message: string
   /** true = provider 限流,进入退避重排队;调度器不识别具体错误类型,由执行层上报。 */
   rateLimit?: boolean
   /** 执行层视角的 ready(是否已发出首个请求)。重轻罚分流依据:onReady 已回调时以其为准,此值仅可升级。 */
   ready?: boolean
+  /** 失败原因分类(执行层可上报;调度器在自己的判定点补 timeout/attempts-exhausted/deadlock)。 */
+  reason?: SwarmFailureReason
 }
 
 export interface AttemptCallbacks {
@@ -88,6 +102,8 @@ export interface SwarmResultEntry {
   elapsedMs?: number
   /** 子会话 id(路径 B 的 subagent session id,可直接用于二期 resume)。 */
   agentId?: string
+  /** 失败原因(仅 failed 有):timeout/empty-output/provider-error/attempts-exhausted/deadlock… */
+  reason?: SwarmFailureReason
 }
 
 export interface SwarmBatchOptions {
@@ -133,7 +149,7 @@ interface Attempt {
 
 type AttemptOutcome =
   | { kind: 'final'; result: SwarmResultEntry }
-  | { kind: 'rate_limited'; error: string; ready: boolean }
+  | { kind: 'rate_limited'; error: string; ready: boolean; reason?: SwarmFailureReason }
 
 export class SwarmBatch {
   private readonly launcher: SwarmLauncher
@@ -326,9 +342,10 @@ export class SwarmBatch {
             kind: 'rate_limited',
             error: this.attemptErrorMessage(attempt, error.message, 'failed'),
             ready,
+            ...(error.reason === undefined ? {} : { reason: error.reason }),
           })
         } else {
-          this.handleAttemptOutcome(attempt, { kind: 'final', result: this.failedResult(attempt, error.message) })
+          this.handleAttemptOutcome(attempt, { kind: 'final', result: this.failedResult(attempt, error.message, error.reason) })
         }
       },
       // onSuspended 由调度器在 requeue 时回调(见 requeueRateLimited)。
@@ -367,14 +384,19 @@ export class SwarmBatch {
     }
   }
 
-  private failedResult(attempt: Attempt, message: string): SwarmResultEntry {
+  private failedResult(attempt: Attempt, message: string, reported?: SwarmFailureReason): SwarmResultEntry {
     const aborted = attempt.controller.signal.aborted && !attempt.timedOut
     const status = aborted ? 'aborted' : 'failed'
+    // 原因优先级:超时(调度器判定) > 执行层上报 > aborted / failed 兜底。
+    const reason: SwarmFailureReason = attempt.timedOut
+      ? 'timeout'
+      : (status === 'aborted' ? 'aborted' : (reported ?? 'failed'))
     return {
       task: attempt.state.task,
       status,
       state: attempt.state.everLaunched ? 'started' : 'not_started',
       error: this.attemptErrorMessage(attempt, message, status),
+      reason,
       ...this.observe(attempt.state, Date.now()),
     }
   }
@@ -406,6 +428,8 @@ export class SwarmBatch {
         status: 'failed',
         state: 'started',
         error,
+        // 超时是根因时以 timeout 为准(比"预算用尽"更能指导上层决策)。
+        reason: attempt.timedOut ? 'timeout' : 'attempts-exhausted',
         ...this.observe(attempt.state, Date.now()),
       })
     } else if (this.isOnlyUnfinishedTask(attempt.state)) {
@@ -416,6 +440,8 @@ export class SwarmBatch {
         status: 'failed',
         state: 'started',
         error: outcome.error,
+        // 执行层给了原因就用它(更具体);否则用调度器自己的判定。
+        reason: attempt.timedOut ? 'timeout' : (outcome.reason ?? 'deadlock'),
         ...this.observe(attempt.state, Date.now()),
       })
     } else {

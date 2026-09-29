@@ -262,7 +262,7 @@ export function createLlmLauncher(options: LlmLauncherOptions): SwarmLauncher {
       stream = options.llm.stream(buildOptions(task, controller.signal))
     } catch (error) {
       // 请求还没发出就失败:ready=false(调度器按重罚处理,若确属限流)。
-      callbacks.onError({ message: messageOf(error), rateLimit: isRetryable(error), ready: false })
+      callbacks.onError({ message: messageOf(error), rateLimit: isRetryable(error), ready: false, reason: 'provider-error' })
       return
     }
 
@@ -271,7 +271,7 @@ export function createLlmLauncher(options: LlmLauncherOptions): SwarmLauncher {
     try {
       for await (const chunk of stream) collector.push(chunk)
     } catch (error) {
-      callbacks.onError({ message: messageOf(error), rateLimit: isRetryable(error), ready: true })
+      callbacks.onError({ message: messageOf(error), rateLimit: isRetryable(error), ready: true, reason: 'provider-error' })
       return
     }
 
@@ -281,24 +281,25 @@ export function createLlmLauncher(options: LlmLauncherOptions): SwarmLauncher {
     switch (reason.kind) {
       case 'stop':
         if (trimmed.length === 0) {
-          callbacks.onError({ message: EMPTY_RESULT_MESSAGE, rateLimit: false, ready: true })
+          callbacks.onError({ message: EMPTY_RESULT_MESSAGE, rateLimit: false, ready: true, reason: 'empty-output' })
           return
         }
         callbacks.onComplete({ result: trimmed })
         return
       case 'max-tokens':
-        callbacks.onError({ message: MAX_TOKENS_MESSAGE, rateLimit: false, ready: true })
+        callbacks.onError({ message: MAX_TOKENS_MESSAGE, rateLimit: false, ready: true, reason: 'max-tokens' })
         return
       case 'aborted':
         // 取消/任务超时:照样回报。批取消时调度器已 finished,会丢弃本次回调;
         // 任务超时时调度器把文案改写成 "Subagent timed out." —— 静默反而会让超时任务永不收尾。
-        callbacks.onError({ message: failure?.message ?? ABORTED_RESULT_MESSAGE, rateLimit: false, ready: true })
+        callbacks.onError({ message: failure?.message ?? ABORTED_RESULT_MESSAGE, rateLimit: false, ready: true, reason: 'aborted' })
         return
       case 'error':
         callbacks.onError({
           message: failure?.message ?? 'Subagent failed without a message.',
           rateLimit: isRetryable(failure),
           ready: true,
+          reason: 'provider-error',
         })
         return
       default:
@@ -307,7 +308,7 @@ export function createLlmLauncher(options: LlmLauncherOptions): SwarmLauncher {
           callbacks.onComplete({ result: trimmed, stopReason: reason.kind })
           return
         }
-        callbacks.onError({ message: failure?.message ?? EMPTY_RESULT_MESSAGE, rateLimit: false, ready: true })
+        callbacks.onError({ message: failure?.message ?? EMPTY_RESULT_MESSAGE, rateLimit: false, ready: true, reason: 'empty-output' })
         return
     }
   }
@@ -334,7 +335,7 @@ export function createLlmLauncher(options: LlmLauncherOptions): SwarmLauncher {
       void runAttempt(task, callbacks, controller).catch((error: unknown) => {
         // 兜底:本模块不应抛出;真抛了也要让调度器拿到终态,不能挂死整批。
         try {
-          callbacks.onError({ message: messageOf(error), rateLimit: false, ready: true })
+          callbacks.onError({ message: messageOf(error), rateLimit: false, ready: true, reason: 'provider-error' })
         } catch {
           /* 调度器已收尾,回调被丢弃 */
         }

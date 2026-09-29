@@ -74,6 +74,7 @@ export interface RenderSwarmOptions {
  */
 export function formatResultLine(result: SwarmResultEntry): string {
   const parts = [`[#${result.task.index + 1}]`, `item=${oneLine(result.task.item)}`, `state=${result.state}`, `outcome=${result.status}`]
+  if (result.reason !== undefined) parts.push(`reason=${result.reason}`)
   if (result.task.resumeAgentId !== undefined) parts.push('resumed=true')
   if (result.stopReason !== undefined) parts.push(`stop_reason=${oneLine(result.stopReason)}`)
   if (result.attempts !== undefined && result.attempts > 1) parts.push(`attempts=${result.attempts}`)
@@ -120,6 +121,8 @@ export interface SwarmValueItem {
   state: string
   outcome: string
   body: string
+  /** 失败原因(仅 failed/aborted 有,T-124)。 */
+  reason?: string
   stopReason?: string
   attempts?: number
   throttled?: boolean
@@ -151,6 +154,7 @@ export function swarmResultValue(
       state: result.state,
       outcome: result.status,
       body,
+      ...(result.reason === undefined ? {} : { reason: result.reason }),
       ...(result.stopReason === undefined ? {} : { stopReason: result.stopReason }),
       ...(result.attempts === undefined ? {} : { attempts: result.attempts }),
       ...(result.throttled === true ? { throttled: true } : {}),

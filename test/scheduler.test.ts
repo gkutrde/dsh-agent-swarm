@@ -25,7 +25,7 @@ type Behavior =
   | 'hang' // 挂起,直到 signal abort
   | 'manual' // 什么也不做,由测试手动驱动 api
   | { rateLimit: true; ready?: boolean; message?: string }
-  | { fail: string }
+  | { fail: string; reason?: import('../src/scheduler.ts').SwarmFailureReason }
 
 interface AttemptApi extends AttemptCallbacks {
   signal: AbortSignal
@@ -96,7 +96,7 @@ function createFakeLauncher(plan: (task: SwarmTask, attempt: number) => Behavior
             ready: behavior.ready ?? false,
           })
         } else {
-          api.onError({ message: behavior.fail })
+          api.onError({ message: behavior.fail, ...(behavior.reason === undefined ? {} : { reason: behavior.reason }) })
         }
       })
     },
@@ -698,4 +698,47 @@ test('onAgent:调度器把 launcher 上报的 id 写进结果', async (t) => {
   }
   const results = await promise
   assert.deepEqual(results.map((r) => r.agentId), ['child-0', 'child-1'])
+})
+
+// ─── T-124:失败原因分类 reason ───
+
+test('T-124 reason:执行层上报的原因透传到结果条目', async (t) => {
+  useFakeTimers(t)
+  const fake = createFakeLauncher(() => ({ fail: 'boom', reason: 'provider-error' }))
+  const results = await runSwarmBatch(makeTasks(1), fake.launcher, {})
+  assert.equal(results[0].status, 'failed')
+  assert.equal(results[0].reason, 'provider-error')
+})
+
+test('T-124 reason:限流重排队用尽预算 → attempts-exhausted', async (t) => {
+  useFakeTimers(t)
+  const fake = createFakeLauncher(() => ({ rateLimit: true }))
+  const promise = runSwarmBatch(makeTasks(2), fake.launcher, { maxAttempts: 1 })
+  await flush()
+  const results = await promise
+  assert.deepEqual(results.map((r) => r.reason), ['attempts-exhausted', 'attempts-exhausted'])
+})
+
+test('T-124 reason:单任务超时 → timeout(而非笼统 failed)', async (t) => {
+  useFakeTimers(t)
+  const fake = createFakeLauncher(() => 'hang')
+  const promise = runSwarmBatch([{ index: 0, item: 'only', prompt: 'p', timeoutMs: 1000 }], fake.launcher, {})
+  await flush()
+  mock.timers.tick(1000)
+  await flush()
+  mock.timers.tick(1000)
+  await flush()
+  const results = await promise
+  assert.equal(results[0].status, 'failed')
+  assert.equal(results[0].reason, 'timeout')
+})
+
+test('T-124 reason:死锁防护判负 → deadlock(执行层未给原因时)', async (t) => {
+  useFakeTimers(t)
+  const fake = createFakeLauncher(() => ({ rateLimit: true }))
+  const promise = runSwarmBatch(makeTasks(1), fake.launcher, {})
+  await flush()
+  const results = await promise
+  assert.equal(results[0].status, 'failed')
+  assert.equal(results[0].reason, 'deadlock')
 })

@@ -220,7 +220,7 @@ test("限流识别:failure.code='RATE_LIMIT' → rateLimit:true、ready:true,执
   makeLauncher(fake).start(task(0), driver.cb, new AbortController().signal)
   await until(() => driver.errors.length === 1, 'error')
   assert.deepEqual(driver.events, ['ready', 'error'])
-  assert.deepEqual(driver.errors[0], { message: '429 Too Many Requests', rateLimit: true, ready: true })
+  assert.deepEqual(driver.errors[0], { message: '429 Too Many Requests', rateLimit: true, ready: true, reason: 'provider-error' })
   assert.equal(typeof driver.cb.onSuspended, 'function', '执行层必须挂上调度器的挂起钩子')
 })
 
@@ -245,20 +245,20 @@ test('无法确定限流的错误一律按非限流(AUTH / 无特征文案 / str
   const authDriver = createDriver()
   makeLauncher(auth).start(task(0), authDriver.cb, new AbortController().signal)
   await until(() => authDriver.errors.length === 1, 'auth error')
-  assert.deepEqual(authDriver.errors[0], { message: 'invalid api key', rateLimit: false, ready: true })
+  assert.deepEqual(authDriver.errors[0], { message: 'invalid api key', rateLimit: false, ready: true, reason: 'provider-error' })
 
   const sync = createFakeLlm(() => ({ kind: 'throw-sync', error: new Error('no adapter registered') }))
   const syncDriver = createDriver()
   makeLauncher(sync).start(task(0), syncDriver.cb, new AbortController().signal)
   await until(() => syncDriver.errors.length === 1, 'sync throw')
   assert.deepEqual(syncDriver.events, ['error'], '同步抛出时请求尚未发出,不报 ready')
-  assert.deepEqual(syncDriver.errors[0], { message: 'no adapter registered', rateLimit: false, ready: false })
+  assert.deepEqual(syncDriver.errors[0], { message: 'no adapter registered', rateLimit: false, ready: false, reason: 'provider-error' })
 
   const asyncThrow = createFakeLlm(() => ({ kind: 'throw-async', error: new Error('transport reset') }))
   const asyncDriver = createDriver()
   makeLauncher(asyncThrow).start(task(0), asyncDriver.cb, new AbortController().signal)
   await until(() => asyncDriver.errors.length === 1, 'async throw')
-  assert.deepEqual(asyncDriver.errors[0], { message: 'transport reset', rateLimit: false, ready: true })
+  assert.deepEqual(asyncDriver.errors[0], { message: 'transport reset', rateLimit: false, ready: true, reason: 'provider-error' })
 })
 
 // ─── 场景 4:空结论 ───
@@ -269,7 +269,7 @@ test('空结论 → onError(非限流)文案 "Subagent completed without a final
   makeLauncher(fake).start(task(0), driver.cb, new AbortController().signal)
   await until(() => driver.errors.length === 1, 'empty error')
   assert.equal(EMPTY_RESULT_MESSAGE, 'Subagent completed without a final message.')
-  assert.deepEqual(driver.errors[0], { message: EMPTY_RESULT_MESSAGE, rateLimit: false, ready: true })
+  assert.deepEqual(driver.errors[0], { message: EMPTY_RESULT_MESSAGE, rateLimit: false, ready: true, reason: 'empty-output' })
   assert.equal(driver.completions.length, 0)
 })
 
