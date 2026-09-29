@@ -157,13 +157,13 @@ mkdir -p ~/.dsh/skills && cp -r skills/swarm-then-team ~/.dsh/skills/
 
 ```bash
 pnpm install
-pnpm test        # node --test,122 个用例
+pnpm test        # node --test（用例数见 CI 徽章，不在此处硬编码以免漂移）
 pnpm pack:check  # 打包断言:README/LICENSE/lib 必须在包里
 pnpm typecheck   # tsc --noEmit
 pnpm build       # tsdown → lib/
 ```
 
-设计取舍与验证方式的内部记录不随仓库发布；可执行的行为契约由 `test/`（124 个用例）与 `CHANGELOG.md` 承载。
+设计取舍与验证方式的内部记录不随仓库发布；可执行的行为契约由 `test/`（覆盖全部已验收行为）与 `CHANGELOG.md` 承载。
 
 ## 兼容性
 

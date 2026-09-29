@@ -21,6 +21,11 @@
 #   followSessionModel: <bool>   subtasks follow the calling agent's provider/model (default: false)
 #   resumeEnabled: <bool>        path B only: continuable children resumable via an item's
 #                                reserved `agent` key (default: false)
+#   subagentAgentOptions: <bool> path B only: pass Config's provider/model/maxTokens to each child
+#                                as host AgentOptions (needs provider support; default: false)
+#   subagentTurnTimeoutMs: <int>=0>  path B only: per-turn wait ceiling; 0 = no ceiling
+#                                (default: timeoutMs, so it never fires before the task timeout)
+#   subagentPollIntervalMs: <int>=1>  path B only: status/session poll interval (default: 500)
 - insert:
     - id: agent-swarm
       name: dsh-agent-swarm

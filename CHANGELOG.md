@@ -2,6 +2,13 @@
 
 本项目遵循 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/) 与 [语义化版本](https://semver.org/lang/zh-CN/)。
 
+## [Unreleased]
+
+### 修复
+
+- `cordis.patch.yml` 的配置注释补齐 3 个路径 B 开关（`subagentAgentOptions` / `subagentTurnTimeoutMs` / `subagentPollIntervalMs`），与 `src/index.ts` 的 Config 键集合完全一致。
+- README 不再硬编码用例数（此前两处数字互相矛盾且过期），改由 CI 徽标表达。
+
 ## [0.5.2] - 2026-09-30
 
 ### 新增
