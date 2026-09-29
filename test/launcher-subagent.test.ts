@@ -1,5 +1,9 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
+
+// 不用 String.prototype.isWellFormed(需要 ES2024 lib);等价的孤代理判定。
+const isWellFormedText = (value: string): boolean =>
+  !/[\uD800-\uDBFF](?![\uDC00-\uDFFF])|(?<![\uD800-\uDBFF])[\uDC00-\uDFFF]/.test(value)
 import {
   createSubagentLauncher,
   resolveSubagentService,
@@ -183,6 +187,22 @@ test('路径 B agentOptions 透传:配置的路由覆盖进入 start 请求', as
   launcher.start(task(0), d.cb, new AbortController().signal)
   await flush()
   assert.deepEqual(fake.last().request.agentOptions, agentOptions)
+  fake.last().run.finish({ output: [{ type: 'text', text: 'ok' }], stopReason: 'completed' })
+  await flush()
+})
+
+// ─── T-133:子会话 label 也不得切碎代理对 ───
+
+test('T-133 label 安全:item 含跨 60 码元边界的 emoji 时,label 不带孤代理', async () => {
+  const fake = createFakeService()
+  const launcher = createSubagentLauncher({ subagents: fake.service, provider: 'spawn', parent: {} })
+  const d = driver()
+  const emojiItem = 'a'.repeat(59) + '😀' + 'tail'
+  launcher.start({ index: 0, item: emojiItem, prompt: 'p' }, d.cb, new AbortController().signal)
+  await flush()
+  const label = String(fake.last().request.label)
+  assert.equal(isWellFormedText(label), true)
+  assert.equal(label, 'a'.repeat(59), '回退到代理对之前')
   fake.last().run.finish({ output: [{ type: 'text', text: 'ok' }], stopReason: 'completed' })
   await flush()
 })

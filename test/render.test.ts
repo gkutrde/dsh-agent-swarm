@@ -1,11 +1,16 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
+
+// 不用 String.prototype.isWellFormed(需要 ES2024 lib);等价的孤代理判定。
+const isWellFormedText = (value: string): boolean =>
+  !/[\uD800-\uDBFF](?![\uDC00-\uDFFF])|(?<![\uD800-\uDBFF])[\uDC00-\uDFFF]/.test(value)
 import {
   renderSwarmResults,
   formatResultLine,
   fenceFor,
   UNKNOWN_BODY,
   SWARM_HEADER_PREFIX,
+  truncateBody,
   swarmResultValue,
   RETRY_HINT,
 } from '../src/render.ts'
@@ -306,4 +311,21 @@ test('T-125 usage:条目用量与整批合计进结构化值;人读文本逐字�
   assert.deepEqual(value.usage, { inputTokens: 7, outputTokens: 10, totalTokens: 25 }, '2+3=5 与 20 相加')
   assert.equal(value.text, text, '文本未因用量改变')
   assert.equal('usage' in swarmResultValue([entry({ index: 0 })], 'T'), false, '无用量则字段缺席')
+})
+
+// ─── T-133:截断不得切碎代理对(emoji) ───
+
+test('T-133 截断落在代理对中间时回退,结果不含孤代理', () => {
+  // 'aa😀bb':UTF-16 长度 2 + 2 + 2;截到 3 会切在 😀 的高代理位
+  const { body, omitted } = truncateBody('aa😀bb', 3)
+  const kept = body.split('\n')[0]
+  assert.equal(isWellFormedText(kept), true, '不得留下孤代理')
+  assert.equal(kept, 'aa', '回退到代理对之前')
+  assert.equal(omitted, 4, 'omitted 按实际保留长度计算(6-2=4)')
+})
+
+test('T-133 边界不受影响:不含代理对的普通截断照旧', () => {
+  const { body, omitted } = truncateBody('abcdef', 3)
+  assert.match(body, /^abc\n… \[truncated: 3 chars omitted\]/)
+  assert.equal(omitted, 3)
 })

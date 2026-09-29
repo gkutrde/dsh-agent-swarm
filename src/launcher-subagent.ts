@@ -20,6 +20,7 @@ import {
   MAX_TOKENS_MESSAGE,
   isRetryableFailure,
 } from './launcher-llm.ts'
+import { sliceAtCodePoint } from './render.ts'
 import type { AttemptCallbacks, SwarmLauncher, SwarmTask } from './scheduler.ts'
 
 export const SUBAGENT_ABORTED_MESSAGE = 'Subagent run was aborted.'
@@ -166,7 +167,7 @@ export function createSubagentLauncher(options: SubagentLauncherOptions): SwarmL
         prompt: [{ type: 'text', text: task.prompt }],
         parent: options.parent,
         signal,
-        label: task.item.slice(0, 60),
+        label: sliceAtCodePoint(task.item, 60),
         ...(options.agentOptions === undefined ? {} : { agentOptions: options.agentOptions }),
       })
     } catch (error) {

@@ -11,6 +11,7 @@
  * `assistant/message` 正文在 `data.message.content`(T-103 探针实测)。
  */
 import { EMPTY_RESULT_MESSAGE } from './launcher-llm.ts'
+import { sliceAtCodePoint } from './render.ts'
 import type { AttemptCallbacks, SwarmLauncher, SwarmTask } from './scheduler.ts'
 
 export const SUBAGENT_TURN_TIMEOUT_MESSAGE = 'Subagent turn did not finish in time.'
@@ -157,7 +158,7 @@ export function createContinuableSubagentLauncher(options: ContinuableLauncherOp
       } else {
         const started = await options.subagents.startContinuable({
           provider: options.provider,
-          label: task.item.slice(0, 60),
+          label: sliceAtCodePoint(task.item, 60),
           request: {
             prompt,
             parent: options.parent,

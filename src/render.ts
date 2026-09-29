@@ -52,11 +52,25 @@ export function bodyOf(result: SwarmResultEntry): string {
 }
 
 /** 单条正文的截断结果:body = 保留正文(含截断标记),omitted = 省略字符数(0 = 未截断)。 */
+/**
+ * 按 UTF-16 码元截断,但**不切碎代理对**(T-133):若切点落在 emoji 等代理对中间,回退一位。
+ * 否则会留下孤代理 → 非法文本,可能污染 JSON 与渲染。
+ */
+export function sliceAtCodePoint(text: string, limit: number): string {
+  if (limit <= 0) return ''
+  if (text.length <= limit) return text
+  const last = text.charCodeAt(limit - 1)
+  const next = text.charCodeAt(limit)
+  const splitsPair = last >= 0xd800 && last <= 0xdbff && next >= 0xdc00 && next <= 0xdfff
+  return text.slice(0, splitsPair ? limit - 1 : limit)
+}
+
 export function truncateBody(body: string, maxBodyChars?: number): { body: string; omitted: number } {
   if (maxBodyChars === undefined || !Number.isFinite(maxBodyChars) || maxBodyChars <= 0) return { body, omitted: 0 }
   if (body.length <= maxBodyChars) return { body, omitted: 0 }
-  const omitted = body.length - maxBodyChars
-  return { body: `${body.slice(0, maxBodyChars)}\n… [truncated: ${omitted} chars omitted]`, omitted }
+  const kept = sliceAtCodePoint(body, maxBodyChars)
+  const omitted = body.length - kept.length
+  return { body: `${kept}\n… [truncated: ${omitted} chars omitted]`, omitted }
 }
 
 /**

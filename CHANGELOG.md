@@ -10,6 +10,7 @@
 
 ### 修复
 
+- **截断可能切碎代理对**：`maxBodyChars` 截断与路径 B 的子会话 `label` 都按 UTF-16 码元截取，若切点落在 emoji 等代理对中间会留下**孤代理**（非法文本，可能污染 JSON/渲染）。现按码点边界回退一位（`sliceAtCodePoint`），截断计数按实际保留长度计算。
 - **参数声明与实现对不齐**：`items` 此前声明为「字符串数组」，而实现自 0.5.0 起支持对象条目 —— 模型只被告知能传字符串，于是**结构化条目对模型不可见**。现用 `oneOf` 同时声明字符串与对象，并在描述里写明字段占位符 `{{item.<key>}}`、内置 `{{index}}`/`{{total}}` 与续跑保留键 `agent`。
 - 用量口径统一：`totalTokens` 只在出现过时才带上（不再由单侧臆造）；批次合计首次遇到 `totalTokens` 时以此前累加的 input/output 为基线，避免漏算前面的条目。
 - `cordis.patch.yml` 的配置注释补齐 3 个路径 B 开关（`subagentAgentOptions` / `subagentTurnTimeoutMs` / `subagentPollIntervalMs`），与 `src/index.ts` 的 Config 键集合完全一致。
