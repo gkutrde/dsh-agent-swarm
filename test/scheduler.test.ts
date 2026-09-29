@@ -26,6 +26,7 @@ type Behavior =
   | 'manual' // 什么也不做,由测试手动驱动 api
   | { rateLimit: true; ready?: boolean; message?: string }
   | { fail: string; reason?: import('../src/scheduler.ts').SwarmFailureReason }
+  | { ok: string; usage?: import('../src/scheduler.ts').SwarmUsage }
 
 interface AttemptApi extends AttemptCallbacks {
   signal: AbortSignal
@@ -88,6 +89,9 @@ function createFakeLauncher(plan: (task: SwarmTask, attempt: number) => Behavior
           signal.addEventListener('abort', () => api.onError({ message: 'aborted' }), { once: true })
         } else if (behavior === 'manual') {
           // 测试手动驱动
+        } else if ('ok' in behavior) {
+          api.onReady()
+          api.onComplete({ result: behavior.ok, ...(behavior.usage === undefined ? {} : { usage: behavior.usage }) })
         } else if ('rateLimit' in behavior) {
           if (behavior.ready) api.onReady()
           api.onError({
@@ -741,4 +745,39 @@ test('T-124 reason:死锁防护判负 → deadlock(执行层未给原因时)', a
   const results = await promise
   assert.equal(results[0].status, 'failed')
   assert.equal(results[0].reason, 'deadlock')
+})
+
+// ─── T-125:usage 统计(跨尝试累加) ───
+
+test('T-125 usage:成功条目的用量落进结果', async (t) => {
+  useFakeTimers(t)
+  const fake = createFakeLauncher(() => ({ ok: 'done', usage: { inputTokens: 2, outputTokens: 3 } }))
+  const results = await runSwarmBatch(makeTasks(1), fake.launcher, {})
+  assert.deepEqual(results[0].usage, { inputTokens: 2, outputTokens: 3 })
+})
+
+test('T-125 usage:重排队后仍带用量,且报的是「所有上报过用量的尝试之和」', async (t) => {
+  useFakeTimers(t)
+  // 注意:单任务首次限流会被死锁防护直接判负,所以这里必须有第二条任务,重试才会真的发生。
+  const plan = (task: SwarmTask, attempt: number) =>
+    task.index === 0 && attempt === 1
+      ? { rateLimit: true as const, message: '429' }
+      : { ok: 'done', usage: { inputTokens: 5, outputTokens: 7 } }
+  const fake = createFakeLauncher(plan)
+  const promise = runSwarmBatch(makeTasks(2), fake.launcher, {})
+  await flush()
+  mock.timers.tick(3_000)
+  await flush()
+  const results = await promise
+  assert.equal(results[0].status, 'completed')
+  assert.equal(results[0].attempts, 2, '确实重排过一次')
+  // 限流那次不携带用量上报 → 合计等于成功那次的用量(累加逻辑对多段上报同样成立)
+  assert.deepEqual(results[0].usage, { inputTokens: 5, outputTokens: 7 })
+})
+
+test('T-125 usage:provider 不给用量时字段缺席(不报错、不影响既有输出)', async (t) => {
+  useFakeTimers(t)
+  const fake = createFakeLauncher(() => 'success')
+  const results = await runSwarmBatch(makeTasks(1), fake.launcher, {})
+  assert.equal('usage' in results[0], false)
 })

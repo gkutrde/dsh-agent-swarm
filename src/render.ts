@@ -123,6 +123,8 @@ export interface SwarmValueItem {
   body: string
   /** 失败原因(仅 failed/aborted 有,T-124)。 */
   reason?: string
+  /** 该条目的 token 用量(所有尝试之和;provider 不给则缺席,T-125)。 */
+  usage?: { inputTokens: number; outputTokens: number; totalTokens?: number }
   stopReason?: string
   attempts?: number
   throttled?: boolean
@@ -136,6 +138,8 @@ export interface SwarmValue {
   text: string
   counts: { completed: number; failed: number; aborted: number }
   items: SwarmValueItem[]
+  /** 整批 token 合计(所有条目所有尝试之和);一条都没上报时缺席(T-125)。 */
+  usage?: { inputTokens: number; outputTokens: number; totalTokens?: number }
 }
 
 export function swarmResultValue(
@@ -155,6 +159,7 @@ export function swarmResultValue(
       outcome: result.status,
       body,
       ...(result.reason === undefined ? {} : { reason: result.reason }),
+      ...(result.usage === undefined ? {} : { usage: result.usage }),
       ...(result.stopReason === undefined ? {} : { stopReason: result.stopReason }),
       ...(result.attempts === undefined ? {} : { attempts: result.attempts }),
       ...(result.throttled === true ? { throttled: true } : {}),
@@ -164,5 +169,16 @@ export function swarmResultValue(
       ...(omitted > 0 ? { truncated: omitted } : {}),
     })
   }
-  return { text, counts, items }
+  // 整批合计:有任一条上报过用量才有该字段(provider 不给用量时字段缺席)。
+  let usage: SwarmValue['usage']
+  for (const item of items) {
+    if (item.usage === undefined) continue
+    const itemTotal = item.usage.totalTokens ?? item.usage.inputTokens + item.usage.outputTokens
+    usage = {
+      inputTokens: (usage?.inputTokens ?? 0) + item.usage.inputTokens,
+      outputTokens: (usage?.outputTokens ?? 0) + item.usage.outputTokens,
+      totalTokens: (usage?.totalTokens ?? 0) + itemTotal,
+    }
+  }
+  return { text, counts, items, ...(usage === undefined ? {} : { usage }) }
 }

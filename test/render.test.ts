@@ -294,3 +294,16 @@ test('reason= 字段:失败条目输出原因,成功条目不输出', () => {
   assert.equal(value.items[0].reason, 'timeout')
   assert.equal('reason' in swarmResultValue([entry({ index: 0, result: 'ok' })], 'T').items[0], false)
 })
+
+// ─── T-125:用量进结构化值(不进人读文本) ───
+
+test('T-125 usage:条目用量与整批合计进结构化值;人读文本逐字不变', () => {
+  const a = { ...entry({ index: 0, result: 'ok' }), usage: { inputTokens: 2, outputTokens: 3 } }
+  const b = { ...entry({ index: 1, result: 'ok' }), usage: { inputTokens: 5, outputTokens: 7, totalTokens: 20 } }
+  const text = renderSwarmResults([a, b])
+  const value = swarmResultValue([a, b], text)
+  assert.deepEqual(value.items[0].usage, { inputTokens: 2, outputTokens: 3 })
+  assert.deepEqual(value.usage, { inputTokens: 7, outputTokens: 10, totalTokens: 25 }, '2+3=5 与 20 相加')
+  assert.equal(value.text, text, '文本未因用量改变')
+  assert.equal('usage' in swarmResultValue([entry({ index: 0 })], 'T'), false, '无用量则字段缺席')
+})

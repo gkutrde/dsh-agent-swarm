@@ -92,6 +92,17 @@ export const AGENT_SWARM_OUTPUT = {
     required: ['text', 'counts', 'items'],
     properties: {
       text: { type: 'string', description: 'Human-readable summary; identical to what the user sees.' },
+      usage: {
+        type: 'object',
+        additionalProperties: false,
+        required: ['inputTokens', 'outputTokens'],
+        description: 'Batch token totals (sum over every item and every attempt); absent when the provider reports no usage.',
+        properties: {
+          inputTokens: { type: 'integer' },
+          outputTokens: { type: 'integer' },
+          totalTokens: { type: 'integer' },
+        },
+      },
       counts: {
         type: 'object',
         additionalProperties: false,
@@ -115,6 +126,17 @@ export const AGENT_SWARM_OUTPUT = {
             outcome: { type: 'string', description: 'completed | failed | aborted' },
             body: { type: 'string' },
             reason: { type: 'string', description: 'Failure cause: timeout | empty-output | provider-error | attempts-exhausted | deadlock | aborted.' },
+            usage: {
+              type: 'object',
+              additionalProperties: false,
+              required: ['inputTokens', 'outputTokens'],
+              description: 'Token usage for this item, summed over its attempts.',
+              properties: {
+                inputTokens: { type: 'integer' },
+                outputTokens: { type: 'integer' },
+                totalTokens: { type: 'integer' },
+              },
+            },
             stopReason: { type: 'string' },
             attempts: { type: 'integer' },
             throttled: { type: 'boolean' },

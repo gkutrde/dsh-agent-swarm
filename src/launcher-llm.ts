@@ -15,7 +15,7 @@
  * - 限流用稳定码 \`RATE_LIMIT\`;账号配额 \`QUOTA\`。判定表见模块文档 §5。
  */
 import { randomUUID } from 'node:crypto'
-import type { AttemptCallbacks, SwarmLauncher, SwarmTask } from './scheduler.ts'
+import type { AttemptCallbacks, SwarmLauncher, SwarmTask, SwarmUsage } from './scheduler.ts'
 
 export const PLUGIN_NAME = 'dsh-agent-swarm'
 
@@ -111,6 +111,32 @@ const RATE_LIMIT_MESSAGE = /rate[ _-]?limit|too many requests|\b429\b|quota|over
  * 从调用方 agent 读出它当前使用的路由(宿主 dsh-agent 的 AgentOptions: { provider?, model? })。
  * Config 未显式指定时可用它让子任务跟随会话模型;形状不符返回 undefined(不猜字段名)。
  */
+/** 读取宿主 usage chunk 的用量(字段名取自宿主 TokenUsage;形状不符返回 undefined,不猜)。 */
+function readUsage(value: unknown): SwarmUsage | undefined {
+  if (typeof value !== 'object' || value === null) return undefined
+  const raw = value as { inputTokens?: unknown; outputTokens?: unknown; totalTokens?: unknown }
+  const input = typeof raw.inputTokens === 'number' && Number.isFinite(raw.inputTokens) ? raw.inputTokens : undefined
+  const output = typeof raw.outputTokens === 'number' && Number.isFinite(raw.outputTokens) ? raw.outputTokens : undefined
+  if (input === undefined && output === undefined) return undefined
+  const total = typeof raw.totalTokens === 'number' && Number.isFinite(raw.totalTokens) ? raw.totalTokens : undefined
+  return { inputTokens: input ?? 0, outputTokens: output ?? 0, ...(total === undefined ? {} : { totalTokens: total }) }
+}
+
+/** 合并两次用量(provider 分多次发 usage 时按字段相加)。 */
+function mergeUsage(previous: SwarmUsage | undefined, next: SwarmUsage): SwarmUsage {
+  if (previous === undefined) return next
+  const inputTokens = previous.inputTokens + next.inputTokens
+  const outputTokens = previous.outputTokens + next.outputTokens
+  const hasTotal = previous.totalTokens !== undefined || next.totalTokens !== undefined
+  return {
+    inputTokens,
+    outputTokens,
+    ...(hasTotal
+      ? { totalTokens: (previous.totalTokens ?? previous.inputTokens + previous.outputTokens) + (next.totalTokens ?? next.inputTokens + next.outputTokens) }
+      : {}),
+  }
+}
+
 export function resolveAgentRoute(agent: unknown): { provider: string; model: string } | undefined {
   const options = (agent as { options?: { provider?: unknown; model?: unknown } } | undefined)?.options
   if (options === undefined || options === null || typeof options !== 'object') return undefined
@@ -268,8 +294,16 @@ export function createLlmLauncher(options: LlmLauncherOptions): SwarmLauncher {
 
     callbacks.onReady()
     const collector = createTextCollector()
+    // T-125:累计 usage chunk(provider 可能只发一次,也可能多次;缺字段就保持缺席)。
+    let usage: SwarmUsage | undefined
     try {
-      for await (const chunk of stream) collector.push(chunk)
+      for await (const chunk of stream) {
+        collector.push(chunk)
+        if (chunk.type === 'usage') {
+          const read = readUsage(chunk.usage)
+          if (read !== undefined) usage = mergeUsage(usage, read)
+        }
+      }
     } catch (error) {
       callbacks.onError({ message: messageOf(error), rateLimit: isRetryable(error), ready: true, reason: 'provider-error' })
       return
@@ -284,7 +318,7 @@ export function createLlmLauncher(options: LlmLauncherOptions): SwarmLauncher {
           callbacks.onError({ message: EMPTY_RESULT_MESSAGE, rateLimit: false, ready: true, reason: 'empty-output' })
           return
         }
-        callbacks.onComplete({ result: trimmed })
+        callbacks.onComplete({ result: trimmed, ...(usage === undefined ? {} : { usage }) })
         return
       case 'max-tokens':
         callbacks.onError({ message: MAX_TOKENS_MESSAGE, rateLimit: false, ready: true, reason: 'max-tokens' })
@@ -305,7 +339,7 @@ export function createLlmLauncher(options: LlmLauncherOptions): SwarmLauncher {
       default:
         // 协议可扩展:未知终态有正文就当完成,否则按空结论报错。
         if (trimmed.length > 0) {
-          callbacks.onComplete({ result: trimmed, stopReason: reason.kind })
+          callbacks.onComplete({ result: trimmed, stopReason: reason.kind, ...(usage === undefined ? {} : { usage }) })
           return
         }
         callbacks.onError({ message: failure?.message ?? EMPTY_RESULT_MESSAGE, rateLimit: false, ready: true, reason: 'empty-output' })

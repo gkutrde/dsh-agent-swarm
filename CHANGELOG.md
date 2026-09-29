@@ -6,6 +6,7 @@
 
 ### 新增
 
+- **token 用量统计**：采集宿主 `usage` chunk，按条目跨尝试累加并给出整批合计，放进工具的结构化返回值（`usage: { inputTokens, outputTokens, totalTokens? }`）；provider 不给用量时字段缺席。**人读汇总保持逐字不变**。
 - **失败原因分类 `reason`**：失败条目不再只有笼统的 `failed`，而是带机器可判的原因（`timeout` / `empty-output` / `provider-error` / `max-tokens` / `aborted` / `attempts-exhausted` / `deadlock`），人读汇总输出 `reason=`，结构化值的 item 也带该字段——上层可据此自动决定续跑、重跑该条还是降级给队友。
 - 模板内置变量 `{{index}}`（1-based 序位）与 `{{total}}`（条目总数），便于在模板里表达"第 3/10 项"。
 - **结构化输出**：工具返回值改为对象根（`text` + `counts` + `items[]`，含 `agentId`/`resumed`/`truncated` 等字段），上层可直接取字段而不必正则解析文本行；`text` 仍是用户看到的那份汇总，逐字不变。

@@ -44,9 +44,18 @@ export interface SwarmTask {
   resumeAgentId?: string
 }
 
+/** 单次尝试的 token 用量(T-125):字段取自宿主 `TokenUsage`(inputTokens/outputTokens/totalTokens?)。 */
+export interface SwarmUsage {
+  inputTokens: number
+  outputTokens: number
+  totalTokens?: number
+}
+
 export interface SwarmCompletion {
   result: unknown
   stopReason?: string
+  /** 执行层可上报本次尝试的用量;调度器跨尝试累加后落进结果条目。 */
+  usage?: SwarmUsage
 }
 
 /** 失败原因分类(T-124):由执行层或调度器判定,供上层决定续跑/重跑/降级。 */
@@ -104,6 +113,8 @@ export interface SwarmResultEntry {
   agentId?: string
   /** 失败原因(仅 failed 有):timeout/empty-output/provider-error/attempts-exhausted/deadlock… */
   reason?: SwarmFailureReason
+  /** token 用量(所有尝试之和);provider 不提供用量时字段缺席。 */
+  usage?: SwarmUsage
 }
 
 export interface SwarmBatchOptions {
@@ -134,6 +145,8 @@ interface TaskState {
   firstStartedAt?: number
   /** 被限流挂起重排过(观测用)。 */
   throttled: boolean
+  /** 跨尝试累计的 token 用量(所有尝试之和;provider 不给则保持缺席)。 */
+  usage?: SwarmUsage
   /** 执行层上报的子会话 id(路径 B 才有)。 */
   agentId?: string
 }
@@ -323,12 +336,15 @@ export class SwarmBatch {
       },
       onComplete: (completion) => {
         if (this.finished || this.controller.signal.aborted || !this.active.has(attempt)) return
+        // 用量按「所有尝试之和」累计(重排队/重试过的批次不能只算最后一次)。
+        if (completion.usage !== undefined) state.usage = addUsage(state.usage, completion.usage)
         const result: SwarmResultEntry = {
           task: state.task,
           status: 'completed',
           state: 'started',
           result: completion.result,
           ...(completion.stopReason !== undefined ? { stopReason: completion.stopReason } : {}),
+          ...(state.usage === undefined ? {} : { usage: state.usage }),
           ...this.observe(state, Date.now()),
         }
         this.handleAttemptOutcome(attempt, { kind: 'final', result })
@@ -633,6 +649,21 @@ export class SwarmBatch {
     if (status === 'aborted') return CANCEL_BATCH_MESSAGE
     return message
   }
+}
+
+/** 累加两次用量(缺 totalTokens 时按 input+output 兜底;两侧都没有则省略该字段)。 */
+function addUsage(previous: SwarmUsage | undefined, next: SwarmUsage): SwarmUsage {
+  const merged: SwarmUsage = {
+    inputTokens: (previous?.inputTokens ?? 0) + next.inputTokens,
+    outputTokens: (previous?.outputTokens ?? 0) + next.outputTokens,
+  }
+  const totalPrevious = previous?.totalTokens
+  const totalNext = next.totalTokens
+  if (totalPrevious !== undefined || totalNext !== undefined) {
+    merged.totalTokens = (totalPrevious ?? ((previous?.inputTokens ?? 0) + (previous?.outputTokens ?? 0))) +
+      (totalNext ?? (next.inputTokens + next.outputTokens))
+  }
+  return merged
 }
 
 export function runSwarmBatch(tasks: SwarmTask[], launcher: SwarmLauncher, options: SwarmBatchOptions = {}): Promise<SwarmResultEntry[]> {

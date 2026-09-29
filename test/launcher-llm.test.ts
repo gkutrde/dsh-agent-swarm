@@ -475,3 +475,20 @@ test('resolveAgentRoute:合法形状返回路由,其余一律 undefined(不猜�
   assert.equal(resolveAgentRoute(undefined), undefined)
   assert.equal(resolveAgentRoute({ options: { provider: '  ', model: 'm' } }), undefined)
 })
+
+// ─── T-125:usage 采集 ───
+
+test('T-125 launcher:流里的 usage chunk 落进 onComplete(缺字段则不出现在完成回调里)', async () => {
+  const fake = createFakeLlm(() => ({ kind: 'text', text: '结论' }))
+  const launcher = createLlmLauncher({ llm: fake.llm, provider: 'deepseek-official', model: 'deepseek-flash' })
+  const completions: Array<{ usage?: unknown }> = []
+  const cb = {
+    onReady: () => {},
+    onComplete: (c: { usage?: unknown }) => { completions.push(c) },
+    onError: () => {},
+  }
+  launcher.start({ index: 0, item: 'i', prompt: 'p' }, cb as never, new AbortController().signal)
+  await new Promise<void>((r) => setImmediate(r))
+  assert.equal(completions.length, 1)
+  assert.deepEqual(completions[0].usage, { inputTokens: 1, outputTokens: 1 })
+})
