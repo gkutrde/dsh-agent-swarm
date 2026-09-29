@@ -52,6 +52,8 @@ export interface AgentSwarmJsonSchemaNode {
   required?: string[]
   additionalProperties?: boolean
   items?: AgentSwarmJsonSchemaNode
+  /** 宿主 schema 子集支持 oneOf(与 type 互斥)。 */
+  oneOf?: AgentSwarmJsonSchemaNode[]
 }
 
 export const AGENT_SWARM_PARAMETERS: AgentSwarmJsonSchemaNode = {
@@ -64,12 +66,15 @@ export const AGENT_SWARM_PARAMETERS: AgentSwarmJsonSchemaNode = {
     },
     prompt_template: {
       type: 'string',
-      description: 'Prompt template applied to every item; must contain the {{item}} placeholder.',
+      description:
+        'Prompt template applied to every item. Must reference the item: either {{item}} or a field placeholder {{item.<key>}} (object items). Built-ins: {{index}} (1-based position) and {{total}} (item count).',
     },
     items: {
       type: 'array',
-      items: { type: 'string' },
-      description: 'One entry per subagent: 2-128 distinct strings (file paths, sections, topics, ...).',
+      // 两种形态都要声明:只写 string 会让模型永远不用结构化条目(实现自 T-115 起支持对象)。
+      items: { oneOf: [{ type: 'string' }, { type: 'object' }] },
+      description:
+        'One entry per subagent: 2-128 distinct entries. Each entry is either a string (used as {{item}}) or a flat object whose values are strings or numbers (fields are available as {{item.<key>}}, e.g. {"path":"src/a.ts","focus":"perf"}). A reserved key "agent" names an existing child session id: that entry CONTINUES that child instead of starting a new one.',
     },
   },
   required: ['description', 'items'],

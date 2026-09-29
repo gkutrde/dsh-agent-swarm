@@ -217,11 +217,13 @@ test('工具契约:名称/描述/参数 JSON Schema(宿主子集)/输出投影/�
 
   assert.equal(AGENT_SWARM_PARAMETERS.type, 'object')
   assert.deepEqual(AGENT_SWARM_PARAMETERS.required, ['description', 'items'])
-  const properties = AGENT_SWARM_PARAMETERS.properties as Record<string, { type: string; items?: { type: string } }>
+  const properties = AGENT_SWARM_PARAMETERS.properties as Record<string, { type: string; items?: { oneOf?: Array<{ type?: string }> } }>
   assert.deepEqual(Object.keys(properties).sort(), ['description', 'items', 'prompt_template'])
   assert.equal(properties.description.type, 'string')
   assert.equal(properties.items.type, 'array')
-  assert.equal(properties.items.items?.type, 'string')
+  // T-132:元素形态用 oneOf 声明(字符串或对象),实现支持两者,声明也必须如此。
+  const itemTypes = (properties.items.items?.oneOf ?? []).map((node) => node.type).sort()
+  assert.deepEqual(itemTypes, ['object', 'string'])
   const raw = JSON.stringify(AGENT_SWARM_PARAMETERS)
   assert.equal(/minItems|maxItems|minimum|maximum/.test(raw), false, '宿主 JSON Schema 子集不支持这些关键字')
 
@@ -358,4 +360,21 @@ test('T-127 未提供 onBatchStart:一切照旧(默认行为不变)', async () =
   const fake = createFakeLauncher()
   const result = await makeTool(fake).execute(ARGS, exec())
   assert.match(result.text, /^agent_swarm: 3 items/)
+})
+
+// ─── T-132:参数声明必须与实现一致(对象条目/占位符/保留键都要声明) ───
+
+test('T-132 items 声明同时允许字符串与对象;模板描述写明字段占位符与内置变量', () => {
+  const props = AGENT_SWARM_PARAMETERS.properties as Record<string, { items?: { oneOf?: Array<{ type?: string }> }; description?: string }>
+  const itemNode = props.items.items
+  assert.ok(Array.isArray(itemNode?.oneOf), 'items 元素必须用 oneOf 声明两种形态')
+  const types = (itemNode?.oneOf ?? []).map((n) => n.type)
+  assert.ok(types.includes('string'), '字符串条目必须声明')
+  assert.ok(types.includes('object'), '对象条目必须声明(否则模型永远不会用结构化条目)')
+  assert.match(String(props.items.description), /object/, 'items 描述要提到对象形态')
+  assert.match(String(props.items.description), /agent/, 'items 描述要提到保留键 agent(续跑)')
+  const tpl = String(props.prompt_template?.description ?? '')
+  assert.match(tpl, /\{\{item\./, 'prompt_template 描述要提到 {{item.<key>}}')
+  assert.match(tpl, /\{\{index\}\}/, 'prompt_template 描述要提到内置 {{index}}')
+  assert.match(tpl, /\{\{total\}\}/, 'prompt_template 描述要提到内置 {{total}}')
 })
