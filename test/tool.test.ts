@@ -325,3 +325,37 @@ test('自定义描述会替换默认描述', async () => {
   const tool = makeTool(fake, { description: custom })
   assert.equal(tool.description, custom)
 })
+
+// ─── T-127:开跑预检行(progressLog 开启时) ───
+
+test('T-127 onBatchStart:在启动任何子任务之前回调一次,携带批量参数', async () => {
+  const fake = createFakeLauncher()
+  const seen: Array<{ count: number; startsAtCall: number; rampLimit: number | undefined; rampIntervalMs: number | undefined }> = []
+  const tool = makeTool(fake, {
+    rampLimit: 4,
+    rampIntervalMs: 700,
+    onBatchStart: (info: { count: number; rampLimit?: number; rampIntervalMs?: number }) => {
+      seen.push({ count: info.count, startsAtCall: fake.starts.length, rampLimit: info.rampLimit, rampIntervalMs: info.rampIntervalMs })
+    },
+  })
+  await tool.execute(ARGS, exec())
+  assert.equal(seen.length, 1, '一批只报一次')
+  assert.deepEqual(seen[0], { count: 3, startsAtCall: 0, rampLimit: 4, rampIntervalMs: 700 }, '回调发生在零子任务启动时')
+})
+
+test('T-127 前置校验失败:不触发开跑预检(零子任务启动就不该有开跑日志)', async () => {
+  const fake = createFakeLauncher()
+  let calls = 0
+  await assert.rejects(
+    () => makeTool(fake, { onBatchStart: () => { calls += 1 } }).execute({ ...ARGS, items: ['单条'] }, exec()),
+    /at least 2 items/,
+  )
+  assert.equal(calls, 0)
+  assert.equal(fake.starts.length, 0)
+})
+
+test('T-127 未提供 onBatchStart:一切照旧(默认行为不变)', async () => {
+  const fake = createFakeLauncher()
+  const result = await makeTool(fake).execute(ARGS, exec())
+  assert.match(result.text, /^agent_swarm: 3 items/)
+})

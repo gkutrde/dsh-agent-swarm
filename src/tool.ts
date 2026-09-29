@@ -198,6 +198,8 @@ export interface AgentSwarmToolDeps {
   maxAttempts?: number
   /** 观测钩子:每条结果落位时回调(工具入口用它接进度日志)。 */
   onItemSettled?: (result: SwarmResultEntry) => void
+  /** 开跑钩子(T-127):**校验通过、零子任务启动**时回调一次,用于写「开跑预检」日志。 */
+  onBatchStart?: (info: { count: number; rampLimit?: number; rampIntervalMs?: number; timeoutMs: number }) => void
   /** 覆盖工具描述(按执行路径生成,见 agentSwarmDescription)。缺省 = 路径 A 文案。 */
   description?: string
 }
@@ -279,6 +281,14 @@ export function createAgentSwarmTool(deps: AgentSwarmToolDeps): AgentSwarmToolDe
         ...(spec.resumeAgentId === undefined ? {} : { resumeAgentId: spec.resumeAgentId }),
         ...(deps.timeoutMs > 0 ? { timeoutMs: deps.timeoutMs } : {}),
       }))
+
+      // 到这里:前置校验已过、launcher 已建好、**还没有任何子任务启动** —— 正是写开跑预检的时机。
+      deps.onBatchStart?.({
+        count: tasks.length,
+        ...(deps.rampLimit === undefined ? {} : { rampLimit: deps.rampLimit }),
+        ...(deps.rampIntervalMs === undefined ? {} : { rampIntervalMs: deps.rampIntervalMs }),
+        timeoutMs: deps.timeoutMs,
+      })
 
       try {
         const results = await runSwarmBatch(tasks, launcher, {

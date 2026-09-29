@@ -176,6 +176,12 @@ export function apply(ctx: Context, config: Config): void {
       ...(config.toolTimeoutMs === undefined ? {} : { toolTimeoutMs: config.toolTimeoutMs }),
       ...(config.progressLog === true
         ? {
+            onBatchStart: (info: { count: number; rampLimit?: number; rampIntervalMs?: number; timeoutMs: number }) => {
+              ctx.logger?.info?.(
+                `[dsh-agent-swarm] starting ${info.count} subtasks (first wave ${info.rampLimit ?? 5}, +1 every ${info.rampIntervalMs ?? 700}ms, per-task timeout ${info.timeoutMs}ms)`,
+                { count: info.count, rampLimit: info.rampLimit, rampIntervalMs: info.rampIntervalMs, timeoutMs: info.timeoutMs },
+              )
+            },
             onItemSettled: (entry: unknown) => {
               const settled = entry as { task: { index: number; resumeAgentId?: string }; status: string; state: string; attempts?: number; throttled?: boolean; elapsedMs?: number; agentId?: string }
               ctx.logger?.info?.('[dsh-agent-swarm] ' + formatResultLine(settled as never), {
