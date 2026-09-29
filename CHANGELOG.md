@@ -4,6 +4,10 @@
 
 ## [Unreleased]
 
+### 测试
+
+- 补齐 `src/index.ts` 的配置接线直接覆盖（此前是唯一无测试的模块）：描述按路径分支、`progressLog` 的开跑预检与落位钩子、路径 B / 续跑选路、`subagentAgentOptions` 组装，共 5 例。
+
 ### 修复
 
 - 用量口径统一：`totalTokens` 只在出现过时才带上（不再由单侧臆造）；批次合计首次遇到 `totalTokens` 时以此前累加的 input/output 为基线，避免漏算前面的条目。
