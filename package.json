@@ -1,6 +1,6 @@
 {
   "name": "dsh-agent-swarm",
-  "version": "0.5.1",
+  "version": "0.5.2",
   "description": "DeepSeek Harness plugin: agent_swarm tool — fan out one prompt template over an item list to a swarm of subagents.",
   "type": "module",
   "main": "lib/index.js",
@@ -58,6 +58,7 @@
     "build": "tsdown",
     "typecheck": "tsc --noEmit",
     "test": "node --test",
-    "pack:check": "node scripts/check-pack.mjs"
+    "pack:check": "node scripts/check-pack.mjs",
+    "prepublishOnly": "pnpm build && node scripts/check-pack.mjs"
   }
 }
