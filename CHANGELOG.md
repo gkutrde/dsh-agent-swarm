@@ -6,6 +6,7 @@
 
 ### 修复
 
+- 用量口径统一：`totalTokens` 只在出现过时才带上（不再由单侧臆造）；批次合计首次遇到 `totalTokens` 时以此前累加的 input/output 为基线，避免漏算前面的条目。
 - `cordis.patch.yml` 的配置注释补齐 3 个路径 B 开关（`subagentAgentOptions` / `subagentTurnTimeoutMs` / `subagentPollIntervalMs`），与 `src/index.ts` 的 Config 键集合完全一致。
 - README 不再硬编码用例数（此前两处数字互相矛盾且过期），改由 CI 徽标表达。
 

@@ -15,6 +15,7 @@
  * - 限流用稳定码 \`RATE_LIMIT\`;账号配额 \`QUOTA\`。判定表见模块文档 §5。
  */
 import { randomUUID } from 'node:crypto'
+import { mergeUsage } from './scheduler.ts'
 import type { AttemptCallbacks, SwarmLauncher, SwarmTask, SwarmUsage } from './scheduler.ts'
 
 export const PLUGIN_NAME = 'dsh-agent-swarm'
@@ -122,20 +123,7 @@ function readUsage(value: unknown): SwarmUsage | undefined {
   return { inputTokens: input ?? 0, outputTokens: output ?? 0, ...(total === undefined ? {} : { totalTokens: total }) }
 }
 
-/** 合并两次用量(provider 分多次发 usage 时按字段相加)。 */
-function mergeUsage(previous: SwarmUsage | undefined, next: SwarmUsage): SwarmUsage {
-  if (previous === undefined) return next
-  const inputTokens = previous.inputTokens + next.inputTokens
-  const outputTokens = previous.outputTokens + next.outputTokens
-  const hasTotal = previous.totalTokens !== undefined || next.totalTokens !== undefined
-  return {
-    inputTokens,
-    outputTokens,
-    ...(hasTotal
-      ? { totalTokens: (previous.totalTokens ?? previous.inputTokens + previous.outputTokens) + (next.totalTokens ?? next.inputTokens + next.outputTokens) }
-      : {}),
-  }
-}
+
 
 export function resolveAgentRoute(agent: unknown): { provider: string; model: string } | undefined {
   const options = (agent as { options?: { provider?: unknown; model?: unknown } } | undefined)?.options

@@ -11,6 +11,7 @@ import {
   SUBAGENT_TIMEOUT_MESSAGE,
   CANCEL_STARTED_MESSAGE,
   CANCEL_NOT_STARTED_MESSAGE,
+  mergeUsage,
   type SwarmTask,
   type AttemptCallbacks,
   type SwarmLauncher,
@@ -780,4 +781,20 @@ test('T-125 usage:provider 不给用量时字段缺席(不报错、不影响既�
   const fake = createFakeLauncher(() => 'success')
   const results = await runSwarmBatch(makeTasks(1), fake.launcher, {})
   assert.equal('usage' in results[0], false)
+})
+
+// ─── T-129:用量合并函数(单一来源) ───
+
+test('T-129 mergeUsage:多次上报相加;totalTokens 缺省时按 input+output 兜底;两侧都无则字段缺席', () => {
+  assert.deepEqual(mergeUsage(undefined, { inputTokens: 2, outputTokens: 3 }), { inputTokens: 2, outputTokens: 3 })
+  assert.deepEqual(
+    mergeUsage({ inputTokens: 2, outputTokens: 3 }, { inputTokens: 5, outputTokens: 7 }),
+    { inputTokens: 7, outputTokens: 10 },
+    '两侧都没 totalTokens -> 不臆造该字段(只累加能确定的量)',
+  )
+  assert.deepEqual(
+    mergeUsage({ inputTokens: 1, outputTokens: 1, totalTokens: 9 }, { inputTokens: 2, outputTokens: 2 }),
+    { inputTokens: 3, outputTokens: 3, totalTokens: 13 },
+    '一侧有 totalTokens -> 另一侧按 input+output 兜底',
+  )
 })

@@ -337,7 +337,7 @@ export class SwarmBatch {
       onComplete: (completion) => {
         if (this.finished || this.controller.signal.aborted || !this.active.has(attempt)) return
         // 用量按「所有尝试之和」累计(重排队/重试过的批次不能只算最后一次)。
-        if (completion.usage !== undefined) state.usage = addUsage(state.usage, completion.usage)
+        if (completion.usage !== undefined) state.usage = mergeUsage(state.usage, completion.usage)
         const result: SwarmResultEntry = {
           task: state.task,
           status: 'completed',
@@ -651,8 +651,11 @@ export class SwarmBatch {
   }
 }
 
-/** 累加两次用量(缺 totalTokens 时按 input+output 兜底;两侧都没有则省略该字段)。 */
-function addUsage(previous: SwarmUsage | undefined, next: SwarmUsage): SwarmUsage {
+/**
+ * 合并两次用量(T-129 起为**唯一实现**,launcher 与调度器共用,避免逻辑分叉):
+ * 字段相加;totalTokens 缺省时按该次 input+output 兜底;两侧都没有 totalTokens 则结果也不带该字段。
+ */
+export function mergeUsage(previous: SwarmUsage | undefined, next: SwarmUsage): SwarmUsage {
   const merged: SwarmUsage = {
     inputTokens: (previous?.inputTokens ?? 0) + next.inputTokens,
     outputTokens: (previous?.outputTokens ?? 0) + next.outputTokens,

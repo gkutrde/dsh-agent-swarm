@@ -6,7 +6,7 @@
  * 因此正文含 \`<subagent>\`、\`</agent_swarm_result>\`、\`\`\` 围栏等任意标记文本时,
  * 外层结构都不崩、正文逐字保留。
  */
-import type { SwarmResultEntry } from './scheduler.ts'
+import type { SwarmResultEntry, SwarmUsage } from './scheduler.ts'
 
 const FENCE_CHAR = '`'
 
@@ -123,8 +123,8 @@ export interface SwarmValueItem {
   body: string
   /** 失败原因(仅 failed/aborted 有,T-124)。 */
   reason?: string
-  /** 该条目的 token 用量(所有尝试之和;provider 不给则缺席,T-125)。 */
-  usage?: { inputTokens: number; outputTokens: number; totalTokens?: number }
+  /** 该条目的 token 用量(所有尝试之和;provider 不给则缺席,T-125)。形状取自调度器,单一来源。 */
+  usage?: SwarmUsage
   stopReason?: string
   attempts?: number
   throttled?: boolean
@@ -138,8 +138,8 @@ export interface SwarmValue {
   text: string
   counts: { completed: number; failed: number; aborted: number }
   items: SwarmValueItem[]
-  /** 整批 token 合计(所有条目所有尝试之和);一条都没上报时缺席(T-125)。 */
-  usage?: { inputTokens: number; outputTokens: number; totalTokens?: number }
+  /** 整批 token 合计(所有条目所有尝试之和);一条都没上报时缺席(T-125)。形状取自调度器,单一来源。 */
+  usage?: SwarmUsage
 }
 
 export function swarmResultValue(
@@ -170,15 +170,23 @@ export function swarmResultValue(
     })
   }
   // 整批合计:有任一条上报过用量才有该字段(provider 不给用量时字段缺席)。
+  // 与 scheduler.mergeUsage 同口径:只有出现过 totalTokens 才带该字段(不臆造)。
   let usage: SwarmValue['usage']
+  let sawTotal = false
   for (const item of items) {
     if (item.usage === undefined) continue
-    const itemTotal = item.usage.totalTokens ?? item.usage.inputTokens + item.usage.outputTokens
-    usage = {
+    const itemTotal = item.usage.totalTokens
+    if (itemTotal !== undefined) sawTotal = true
+    const nextUsage: SwarmUsage = {
       inputTokens: (usage?.inputTokens ?? 0) + item.usage.inputTokens,
       outputTokens: (usage?.outputTokens ?? 0) + item.usage.outputTokens,
-      totalTokens: (usage?.totalTokens ?? 0) + itemTotal,
     }
+    if (sawTotal) {
+      // 首次出现 totalTokens 时,此前只累加过 input/output —— 用它们作基线,别把前面条目漏掉。
+      const baseline = usage?.totalTokens ?? (usage === undefined ? 0 : usage.inputTokens + usage.outputTokens)
+      nextUsage.totalTokens = baseline + (itemTotal ?? item.usage.inputTokens + item.usage.outputTokens)
+    }
+    usage = nextUsage
   }
   return { text, counts, items, ...(usage === undefined ? {} : { usage }) }
 }
