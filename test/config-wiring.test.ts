@@ -204,3 +204,42 @@ test('T-130 subagentAgentOptions:开关打开才把 provider/model 作为 AgentO
   assert.equal(h.continuables.length, 2, '两个新建条目 -> 两次 startContinuable')
   assert.deepEqual(h.continuables[0].agentOptions, { provider: 'deepseek-official', model: 'deepseek-flash' })
 })
+
+// ─── T-138:工具层必须把 exec.signal 接给调度器(否则用户取消会一直等到超时) ───
+
+test('T-138 端到端取消:exec.signal 触发后批量及时收尾,全部条目判 aborted', async () => {
+  const logs: Array<{ msg: unknown }> = []
+  const definitions: Array<{ execute: (args: unknown, exec: unknown) => Promise<{ text: string; counts: { aborted: number } }> }> = []
+  // 执行层永不产出:只有取消能让它收尾。
+  const llm = {
+    stream() {
+      return (async function* () {
+        await new Promise(() => undefined)
+      })()
+    },
+  }
+  const target = {
+    effect: (fn: () => unknown) => fn(),
+    logger: { info: (msg: unknown) => logs.push({ msg }) },
+    tools: { register: (definition: unknown) => { definitions.push(definition as never); return () => undefined } },
+    llm,
+    get: () => undefined,
+  }
+  const ctx = new Proxy(target as Record<string | symbol, unknown>, { get: (obj, key) => Reflect.get(obj, key) })
+  apply(ctx as never, Config({}) as never)
+  const controller = new AbortController()
+  const started = Date.now()
+  const promise = definitions[0].execute(
+    { description: 'd', prompt_template: '看 {{item}}', items: ['a', 'b', 'c'] },
+    { signal: controller.signal, agent: undefined },
+  )
+  await new Promise<void>((resolve) => setTimeout(resolve, 20))
+  controller.abort()
+  const value = await Promise.race([
+    promise,
+    new Promise<never>((_, reject) => setTimeout(() => reject(new Error('取消后未及时收尾(接线可能断了)')), 5_000)),
+  ])
+  assert.equal(value.counts.aborted, 3, '三条都判 aborted')
+  assert.match(value.text, /aborted: 3/)
+  assert.ok(Date.now() - started < 5_000, '必须及时收尾,不得等到超时')
+})
