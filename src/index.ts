@@ -109,13 +109,24 @@ export function apply(ctx: Context, config: Config): void {
   const subagents = (ctx as { get?: (name: string) => unknown }).get?.('subagents') as SubagentServiceLike | undefined
   ctx.effect(() => {
     const tool = createAgentSwarmTool({
-      createLauncher: (exec) => {
+      createLauncher: (exec, hint) => {
         // 路径 B 的服务必须在**调用点**从 agent 作用域解析(插件自身 ctx 看不到兄弟作用域注册的服务)。
         const subagentService = resolveSubagentService(exec.agent, subagents)
-        const useSubagent = (config.subagentProvider ?? '').trim() !== ''
-        if (useSubagent && subagentService === undefined) {
+        const configured = (config.subagentProvider ?? '').trim()
+        const auto = configured.toLowerCase() === 'auto'
+        // auto 只是**策略**;真正传给宿主的必须是已注册的提供方名。默认 spawn(宿主 base bundle 自带)。
+        const subagentProviderName = auto ? 'spawn' : configured
+        // T-139:auto = 按每次调用的提示判定;显式提供方名 = 固定路径 B;空 = 固定路径 A(默认,行为不变)。
+        const wantSubagent = auto ? hint?.mode === 'subagent' : configured !== ''
+        if (!auto && wantSubagent && subagentService === undefined) {
           throw new Error('agent_swarm subagentProvider is set but the subagents service is unavailable in this scope.')
         }
+        // auto 判到 B 但服务不可用 -> 退回 A 并标注(绝不因路由而整批失败)。
+        const useSubagent = wantSubagent && subagentService !== undefined
+        const path: 'llm' | 'subagent' = useSubagent ? 'subagent' : 'llm'
+        const pathReason = auto
+          ? (hint?.reason ?? 'auto') + (wantSubagent && !useSubagent ? ' -> fallback:llm:subagents-unavailable' : '')
+          : (useSubagent ? 'configured:subagentProvider' : 'default:llm')
         // 跟随会话模型:只有显式开启才覆盖 Config 的 provider/model。
         const sessionRoute = config.followSessionModel === true ? resolveAgentRoute(exec.agent) : undefined
         const provider = sessionRoute?.provider ?? config.provider
@@ -138,33 +149,33 @@ export function apply(ctx: Context, config: Config): void {
             throw new Error('agent_swarm resumeEnabled is set but ctx.sessionQuery is unavailable in this scope.')
           }
           const agentLookup = resolveHostService<AgentLookupLike>(exec.agent, 'agents')
-          return createContinuableSubagentLauncher({
+          return { launcher: createContinuableSubagentLauncher({
             subagents: subagentService as never,
             sessions,
             ...(agentLookup === undefined ? {} : { agents: agentLookup }),
-            provider: config.subagentProvider as string,
+            provider: subagentProviderName,
             parent: exec.agent,
             turnTimeoutMs,
             ...(pollIntervalMs === undefined ? {} : { pollIntervalMs }),
             ...(agentOptions === undefined ? {} : { agentOptions }),
-          })
+          }), path, pathReason }
         }
         return useSubagent
-          ? createSubagentLauncher({
+          ? { launcher: createSubagentLauncher({
               subagents: subagentService as SubagentServiceLike,
-              provider: config.subagentProvider as string,
+              provider: subagentProviderName,
               parent: exec.agent,
               ...(agentOptions === undefined ? {} : { agentOptions }),
               ...retryCodes,
-            })
-          : createLlmLauncher({
+            }), path, pathReason }
+          : { launcher: createLlmLauncher({
               llm: app.llm,
               provider,
               model,
               ...(config.maxTokens === undefined ? {} : { maxTokens: config.maxTokens }),
               ...retryCodes,
               ...(config.systemPrompt === undefined ? {} : { systemPrompt: config.systemPrompt }),
-            })
+            }), path, pathReason }
       },
       ...(config.maxConcurrency === undefined ? {} : { maxConcurrency: config.maxConcurrency }),
       ...(config.maxBodyChars === undefined ? {} : { maxBodyChars: config.maxBodyChars }),
@@ -198,8 +209,10 @@ export function apply(ctx: Context, config: Config): void {
           }
         : {}),
       description: agentSwarmDescription({
-        subagent: (config.subagentProvider ?? '').trim() !== '',
+        // auto:描述说明「路由是自动的」;显式提供方名:描述切到路径 B 文案(逐字不变)。
+        subagent: !((config.subagentProvider ?? '').trim().toLowerCase() === 'auto') && (config.subagentProvider ?? '').trim() !== '',
         continuable: config.resumeEnabled === true,
+        auto: (config.subagentProvider ?? '').trim().toLowerCase() === 'auto',
       }),
       timeoutMs: config.timeoutMs,
     })

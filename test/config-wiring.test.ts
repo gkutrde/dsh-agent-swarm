@@ -71,7 +71,17 @@ test('apply 不得直接访问未注入的服务(cordis 对未 inject 的属性�
 
 interface Harness {
   ctx: unknown
-  definitions: Array<{ name: string; description: string; execute: (args: unknown, exec: unknown) => Promise<{ text: string }> }>
+  definitions: Array<{
+    name: string
+    description: string
+    execute: (args: unknown, exec: unknown) => Promise<{
+      text: string
+      counts?: { completed: number; failed: number; aborted: number }
+      // T-139:路径信息进结构化值(人读 text 不变)
+      path?: 'llm' | 'subagent'
+      pathReason?: string
+    }>
+  }>
   logs: Array<{ msg: unknown; meta?: unknown }>
   starts: Array<{ provider: string; prompt: string; label?: string }>
   continuables: Array<{ provider: string; label: string; agentOptions?: unknown }>
@@ -242,4 +252,71 @@ test('T-138 端到端取消:exec.signal 触发后批量及时收尾,全部条目
   assert.equal(value.counts.aborted, 3, '三条都判 aborted')
   assert.match(value.text, /aborted: 3/)
   assert.ok(Date.now() - started < 5_000, '必须及时收尾,不得等到超时')
+})
+
+// ─── T-139:auto 路由(插件自己判断走 A 还是 B) ───
+
+test('T-139 auto:像要读文件的批次 -> 走路径 B(条目带 agentId,path=subagent)', async () => {
+  const h = makeHarness()
+  apply(h.ctx as never, Config({ subagentProvider: 'auto', resumeEnabled: true }) as never)
+  const r = await h.definitions[0].execute(
+    { description: 'auto-b', prompt_template: '读取文件 {{item}} 并回答第一行', items: ['a.ts', 'b.ts'] },
+    execWith(h.agent),
+  )
+  assert.match(h.definitions[0].description, /AUTOMATIC/, 'auto 时描述应说明路由自动')
+  assert.equal(r.path, 'subagent')
+  assert.equal(h.continuables.length, 2, 'auto 判到 B -> 走续跑 launcher(配置里 resumeEnabled=true)')
+  assert.equal(h.continuables[0].provider, 'spawn', 'auto 必须解析成真实提供方名(不能把 "auto" 传给宿主)')
+})
+
+test('T-139 auto:纯问答批次 -> 走路径 A(path=llm,不创建子代理)', async () => {
+  const h = makeHarness()
+  apply(h.ctx as never, Config({ subagentProvider: 'auto' }) as never)
+  const r = await h.definitions[0].execute(
+    { description: 'auto-a', prompt_template: '只回答 {{item}} 这个字', items: ['甲', '乙'] },
+    execWith(h.agent),
+  )
+  assert.equal(r.path, 'llm')
+  assert.equal(h.starts.length, 0, '不得创建子代理')
+  assert.equal(h.llmCalls, 2, '两条各一次 llm 调用')
+})
+
+test('T-139 auto:判到 B 但 subagents 服务不可用 -> 退回 A 并标注,不整批失败', async () => {
+  // 真·无服务环境:插件 ctx 与 agent 作用域都取不到 subagents(共享假件始终带服务,不能用来测降级 —— 踩过一次)。
+  const definitions: Array<{ execute: (a: unknown, e: unknown) => Promise<{ path?: string; pathReason?: string }> }> = []
+  let llmCalls = 0
+  const bareCtx = {
+    effect: (fn: () => unknown) => fn(),
+    logger: { info: () => undefined },
+    tools: { register: (d: unknown) => { definitions.push(d as never); return () => undefined } },
+    llm: {
+      stream() {
+        llmCalls += 1
+        return (async function* () {
+          yield { type: 'finish', reason: { kind: 'stop' } }
+        })()
+      },
+    },
+    get: () => undefined,
+  }
+  apply(bareCtx as never, Config({ subagentProvider: 'auto' }) as never)
+  const r = await definitions[0].execute(
+    { description: 'auto-fallback', prompt_template: '读取文件 {{item}}', items: ['x', 'y'] },
+    { signal: new AbortController().signal, agent: { ctx: { get: () => undefined } } },
+  )
+  assert.equal(r.path, 'llm', '服务缺失必须退回 A')
+  assert.match(String(r.pathReason), /fallback/, '理由里要标注降级')
+  assert.equal(llmCalls, 2, '退回 A 后应真的走 llm')
+})
+
+test('T-139 旧行为不回归:空=固定 A,显式提供方名=固定 B', async () => {
+  const a = makeHarness()
+  apply(a.ctx as never, Config({}) as never)
+  const ra = await a.definitions[0].execute({ description: 'x', prompt_template: '读取文件 {{item}}', items: ['p', 'q'] }, execWith(a.agent))
+  assert.equal(ra.path, 'llm', '默认必须仍是路径 A(即使模板像要读文件)')
+  const b = makeHarness()
+  apply(b.ctx as never, Config({ subagentProvider: 'spawn' }) as never)
+  const rb = await b.definitions[0].execute({ description: 'y', prompt_template: '只回答 {{item}}', items: ['甲', '乙'] }, execWith(b.agent))
+  assert.equal(rb.path, 'subagent', '显式 spawn 必须仍是 B(即使模板不需要工具)')
+  assert.equal(b.starts[0]?.provider, 'spawn', '显式值必须原样传给宿主')
 })

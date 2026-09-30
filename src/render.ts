@@ -154,6 +154,10 @@ export interface SwarmValue {
   items: SwarmValueItem[]
   /** 整批 token 合计(所有条目所有尝试之和);一条都没上报时缺席(T-125)。形状取自调度器,单一来源。 */
   usage?: SwarmUsage
+  /** 本次实际走的执行路径(T-139 自动路由时尤其有用):llm = 路径 A;subagent = 路径 B。 */
+  path?: 'llm' | 'subagent'
+  /** 路径判定理由(可追溯)。 */
+  pathReason?: string
 }
 
 export function swarmResultValue(
@@ -161,6 +165,9 @@ export function swarmResultValue(
   text: string,
   options: RenderSwarmOptions = {},
 ): SwarmValue {
+  // 路径信息只进结构化值(人读 text 逐字不变,T-139)。
+  const path = (options as { path?: 'llm' | 'subagent'; pathReason?: string }).path
+  const pathReason = (options as { pathReason?: string }).pathReason
   const counts = { completed: 0, failed: 0, aborted: 0 }
   const items: SwarmValueItem[] = []
   for (const result of results) {
@@ -202,5 +209,12 @@ export function swarmResultValue(
     }
     usage = nextUsage
   }
-  return { text, counts, items, ...(usage === undefined ? {} : { usage }) }
+  return {
+    text,
+    counts,
+    items,
+    ...(usage === undefined ? {} : { usage }),
+    ...(path === undefined ? {} : { path }),
+    ...(pathReason === undefined ? {} : { pathReason }),
+  }
 }

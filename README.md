@@ -112,7 +112,7 @@ agent_swarm: 2 items — completed: 2
 | `toolTimeoutMs` | 4h | 批级调用上限 |
 | `systemPrompt` | 内置 | 子任务 system 提示 |
 | `progressLog` | false | 每条落位写一行进度日志 |
-| `subagentProvider` | 空 | **路径 B**：`spawn` / `fork` 等提供方名 |
+| `subagentProvider` | 空 | 空 = 固定**路径 A**；`spawn` / `fork` = 固定**路径 B**；**`auto` = 每次调用自动判断**（需要工具走 B，否则 A，判定依据见下方「路径 A / B」）|
 | `followSessionModel` | false | 子任务跟随调用方 agent 的 provider/model |
 | `resumeEnabled` | false | 路径 B 且为真：子级可续（条目用 `agent` 键接力） |
 | `subagentAgentOptions` | false | 路径 B：把 Config 的 provider/model/maxTokens 作为宿主 `AgentOptions` 传给子代理（需提供方支持） |
@@ -130,6 +130,8 @@ agent_swarm: 2 items — completed: 2
 | 成本/延迟 | 低 | 高 |
 
 用哪条取决于「这个结论是否必须动工具才能得到」。分诊、摘要、审查这类看一遍就能定论的，用路径 A。
+
+**不想每次自己判断？** 把 `subagentProvider` 设成 **`auto`**：插件按「条目是不是文件路径/URL、模板有没有说 读/打开/运行/验证/抓取」这类信号自动选路径，并把结果写进返回值的 `path` / `pathReason` 字段（也可开 `progressLog` 看日志）。判定偏保守——**偏向 B**，因为路径 A 读不到文件时不会报错，而是编造答案。
 
 ## 配合 skill：swarm → team
 

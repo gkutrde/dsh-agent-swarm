@@ -393,3 +393,14 @@ test('T-134 声明一致性:prompt_template 必需、reason 覆盖全部取值�
   assert.match(stateDoc, /not_started/, 'state 必须说明取值 not_started')
   assert.match(stateDoc, /settle|落位|when it/i, 'state 必须说明它描述的是落位时的状态,不是当前状态')
 })
+
+// ─── T-139:结构化值里的每个顶层字段都必须在 output schema 里声明 ───
+
+test('T-139 output schema 必须声明结构化值可能出现的全部顶层字段(否则 additionalProperties:false 会让整批校验失败)', () => {
+  const declared = Object.keys((AGENT_SWARM_OUTPUT.schema.properties ?? {}) as Record<string, unknown>)
+  // 这些是 render/tool 真正会产出的字段;新增字段时必须同步 schema(本次就是漏了 path/pathReason 才炸)。
+  for (const field of ['text', 'counts', 'items', 'usage', 'path', 'pathReason']) {
+    assert.ok(declared.includes(field), 'output schema 必须声明字段 ' + field + ',实际: ' + declared.join(','))
+  }
+  // 反向:声明了但从不产出的字段也算漂移风险,这里只做正向断言。
+})

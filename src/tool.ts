@@ -11,6 +11,7 @@
  */
 import { createSwarmSpecs, type SwarmArgs, type SwarmItem } from './specs.ts'
 import { renderSwarmResults, swarmResultValue, type SwarmValue } from './render.ts'
+import { detectPathMode, type PathHint } from './routing.ts'
 import { runSwarmBatch, type SwarmLauncher, type SwarmResultEntry, type SwarmTask } from './scheduler.ts'
 
 export const AGENT_SWARM_TOOL_NAME = 'agent_swarm'
@@ -31,17 +32,24 @@ const DESCRIPTION_TAIL = 'Rate-limit aware: 429/quota failures are requeued with
 export const AGENT_SWARM_DESCRIPTION =
   DESCRIPTION_HEAD + DESCRIPTION_PROACTIVE + DESCRIPTION_ONE_SHOT_CAPABILITY + DESCRIPTION_ONE_SHOT_SCOPE + DESCRIPTION_TAIL
 
-/** 按实际执行路径生成工具描述(路径 A 逐字不变;路径 B 换成带工具的文案,续跑再补 agent 键说明)。 */
-export function agentSwarmDescription(options: { subagent?: boolean; continuable?: boolean } = {}): string {
-  if (options.subagent !== true) return AGENT_SWARM_DESCRIPTION
-  return (
-    DESCRIPTION_HEAD_SUBAGENT +
-    DESCRIPTION_PROACTIVE +
-    DESCRIPTION_SUBAGENT_CAPABILITY +
-    (options.continuable === true ? DESCRIPTION_RESUME : '') +
-    DESCRIPTION_SUBAGENT_SCOPE +
-    DESCRIPTION_TAIL
-  )
+/** T-139:auto 路由的说明句(只在 auto 时拼进描述,不影响既有两种文案的逐字内容)。 */
+export const DESCRIPTION_AUTO_ROUTING =
+  ' Routing is AUTOMATIC in this deployment: a batch that looks like it needs tools (file paths or URL fields in `items`, or templates that say read/open/run/verify/fetch/check) runs as full subagents WITH tools; anything else runs as a cheap one-shot call. Each result reports which path ran in its structured `path` field, so you do not need to ask.'
+
+export function agentSwarmDescription(options: { subagent?: boolean; continuable?: boolean; auto?: boolean } = {}): string {
+  if (options.subagent === true) {
+    return (
+      DESCRIPTION_HEAD_SUBAGENT +
+      DESCRIPTION_PROACTIVE +
+      DESCRIPTION_SUBAGENT_CAPABILITY +
+      (options.continuable === true ? DESCRIPTION_RESUME : '') +
+      (options.auto === true ? DESCRIPTION_AUTO_ROUTING : '') +
+      DESCRIPTION_SUBAGENT_SCOPE +
+      DESCRIPTION_TAIL
+    )
+  }
+  if (options.auto === true) return AGENT_SWARM_DESCRIPTION + DESCRIPTION_AUTO_ROUTING
+  return AGENT_SWARM_DESCRIPTION
 }
 
 /** 宿主 JSON Schema 子集(仅本模块用到的关键字)。 */
@@ -98,6 +106,9 @@ export const AGENT_SWARM_OUTPUT = {
     required: ['text', 'counts', 'items'],
     properties: {
       text: { type: 'string', description: 'Human-readable summary; identical to what the user sees.' },
+      // T-139:自动路由的判定结果。**必须在此声明** —— additionalProperties:false 会让未声明的字段整批校验失败(踩过)。
+      path: { type: 'string', description: 'Execution path actually used: llm (one-shot, no tools) | subagent (full subagent with tools).' },
+      pathReason: { type: 'string', description: 'Why that path was chosen (e.g. object-item-location-field:path, tool-keyword:读取, default:llm, or a fallback note).' },
       usage: {
         type: 'object',
         additionalProperties: false,
@@ -186,10 +197,17 @@ export interface AgentSwarmToolDefinition {
   execute(args: unknown, exec: AgentSwarmExecContext): Promise<SwarmValue>
 }
 
+/** 执行层选择结果:launcher + 本次实际路径(T-139)。旧的「只返回 launcher」写法仍然兼容。 */
+export interface LauncherSelection {
+  launcher: SwarmLauncher
+  path?: 'llm' | 'subagent'
+  pathReason?: string
+}
+
 export interface AgentSwarmToolDeps {
   /** 每批新建一个 launcher(生产实现 = createLlmLauncher / createSubagentLauncher;测试注入假 launcher)。
    * 接收工具执行上下文:路径 B 需要 `exec.agent` 作为 `parent`。 */
-  createLauncher: (context: AgentSwarmExecContext) => SwarmLauncher
+  createLauncher: (context: AgentSwarmExecContext, hint?: PathHint) => SwarmLauncher | LauncherSelection
   /** 并发硬上限;缺省不限制。 */
   maxConcurrency?: number
   /** 单子任务超时(ms),0 = 不设任务级超时。 */
@@ -209,7 +227,15 @@ export interface AgentSwarmToolDeps {
   /** 观测钩子:每条结果落位时回调(工具入口用它接进度日志)。 */
   onItemSettled?: (result: SwarmResultEntry) => void
   /** 开跑钩子(T-127):**校验通过、零子任务启动**时回调一次,用于写「开跑预检」日志。 */
-  onBatchStart?: (info: { count: number; rampLimit?: number; rampIntervalMs?: number; timeoutMs: number }) => void
+  onBatchStart?: (info: {
+    count: number
+    rampLimit?: number
+    rampIntervalMs?: number
+    timeoutMs: number
+    /** 本次实际路径(T-139);旧调用方可忽略。 */
+    path?: 'llm' | 'subagent'
+    pathReason?: string
+  }) => void
   /** 覆盖工具描述(按执行路径生成,见 agentSwarmDescription)。缺省 = 路径 A 文案。 */
   description?: string
 }
@@ -277,9 +303,22 @@ export function createAgentSwarmTool(deps: AgentSwarmToolDeps): AgentSwarmToolDe
         ...(deps.maxPromptChars === undefined ? {} : { maxPromptChars: deps.maxPromptChars }),
       })
 
+      // T-139:把「本次调用看起来是否需要工具」作为判定提示交给执行层(策略在 index:显式配置优先,auto 才用它)。
+      const hint = detectPathMode({ items: parsed.items, promptTemplate: parsed.prompt_template ?? '' })
       let launcher: SwarmLauncher
+      let selection: { path?: 'llm' | 'subagent'; pathReason?: string } = {}
       try {
-        launcher = deps.createLauncher(exec ?? {})
+        const created = deps.createLauncher(exec ?? {}, hint)
+        if (created !== null && typeof created === 'object' && 'launcher' in (created as object)) {
+          const picked = created as LauncherSelection
+          launcher = picked.launcher
+          selection = {
+            ...(picked.path === undefined ? {} : { path: picked.path }),
+            ...(picked.pathReason === undefined ? {} : { pathReason: picked.pathReason }),
+          }
+        } else {
+          launcher = created as SwarmLauncher
+        }
       } catch (error) {
         throw cleanError(error)
       }
@@ -298,6 +337,7 @@ export function createAgentSwarmTool(deps: AgentSwarmToolDeps): AgentSwarmToolDe
         ...(deps.rampLimit === undefined ? {} : { rampLimit: deps.rampLimit }),
         ...(deps.rampIntervalMs === undefined ? {} : { rampIntervalMs: deps.rampIntervalMs }),
         timeoutMs: deps.timeoutMs,
+        ...selection,
       })
 
       try {
@@ -314,6 +354,7 @@ export function createAgentSwarmTool(deps: AgentSwarmToolDeps): AgentSwarmToolDe
         })
         return swarmResultValue(results, text, {
           ...(deps.maxBodyChars === undefined ? {} : { maxBodyChars: deps.maxBodyChars }),
+          ...selection,
         })
       } catch (error) {
         throw cleanError(error)
