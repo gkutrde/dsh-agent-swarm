@@ -77,7 +77,8 @@ export const AGENT_SWARM_PARAMETERS: AgentSwarmJsonSchemaNode = {
         'One entry per subagent: 2-128 distinct entries. Each entry is either a string (used as {{item}}) or a flat object whose values are strings or numbers (fields are available as {{item.<key>}}, e.g. {"path":"src/a.ts","focus":"perf"}). A reserved key "agent" names an existing child session id: that entry CONTINUES that child instead of starting a new one.',
     },
   },
-  required: ['description', 'items'],
+  // prompt_template 缺失时 specs 会抛 missingTemplate —— 必须是 required,否则模型会踩可预防的错。
+  required: ['description', 'prompt_template', 'items'],
 }
 
 export interface AgentSwarmContentBlock {
@@ -127,10 +128,14 @@ export const AGENT_SWARM_OUTPUT = {
           properties: {
             index: { type: 'integer' },
             item: { type: 'string' },
-            state: { type: 'string' },
+            state: { type: 'string', description: 'Whether the task had been launched when the result settled: started | not_started. This is NOT the current state.' },
             outcome: { type: 'string', description: 'completed | failed | aborted' },
             body: { type: 'string' },
-            reason: { type: 'string', description: 'Failure cause: timeout | empty-output | provider-error | attempts-exhausted | deadlock | aborted.' },
+            reason: {
+              type: 'string',
+              description:
+                'Failure cause (failed/aborted only): timeout | empty-output | provider-error | max-tokens | refusal | aborted | attempts-exhausted | deadlock | failed. Use it to decide whether to resume, retry just this item, or hand off.',
+            },
             usage: {
               type: 'object',
               additionalProperties: false,

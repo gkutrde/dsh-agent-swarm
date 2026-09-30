@@ -216,7 +216,7 @@ test('工具契约:名称/描述/参数 JSON Schema(宿主子集)/输出投影/�
   assert.ok(AGENT_SWARM_DESCRIPTION.length > 40, '描述要能指导模型何时使用')
 
   assert.equal(AGENT_SWARM_PARAMETERS.type, 'object')
-  assert.deepEqual(AGENT_SWARM_PARAMETERS.required, ['description', 'items'])
+  assert.deepEqual(AGENT_SWARM_PARAMETERS.required, ['description', 'prompt_template', 'items'], 'prompt_template 缺失即抛错,必须是 required')
   const properties = AGENT_SWARM_PARAMETERS.properties as Record<string, { type: string; items?: { oneOf?: Array<{ type?: string }> } }>
   assert.deepEqual(Object.keys(properties).sort(), ['description', 'items', 'prompt_template'])
   assert.equal(properties.description.type, 'string')
@@ -377,4 +377,19 @@ test('T-132 items 声明同时允许字符串与对象;模板描述写明字段�
   assert.match(tpl, /\{\{item\./, 'prompt_template 描述要提到 {{item.<key>}}')
   assert.match(tpl, /\{\{index\}\}/, 'prompt_template 描述要提到内置 {{index}}')
   assert.match(tpl, /\{\{total\}\}/, 'prompt_template 描述要提到内置 {{total}}')
+})
+
+// ─── T-134:对外声明与实现彻底对齐(required / reason 全量取值 / state 语义) ───
+
+test('T-134 声明一致性:prompt_template 必需、reason 覆盖全部取值、state 有语义说明', () => {
+  assert.deepEqual(AGENT_SWARM_PARAMETERS.required, ['description', 'prompt_template', 'items'], 'prompt_template 缺失即抛错,必须声明为必需')
+  const itemProps = (AGENT_SWARM_OUTPUT.schema.properties as never as { items: { items: { properties: Record<string, { description?: string }> } } }).items.items.properties
+  const reasonDoc = String(itemProps.reason.description ?? '')
+  for (const value of ['timeout', 'empty-output', 'provider-error', 'max-tokens', 'refusal', 'aborted', 'attempts-exhausted', 'deadlock', 'failed']) {
+    assert.match(reasonDoc, new RegExp(value), 'reason 描述必须覆盖取值 ' + value)
+  }
+  const stateDoc = String(itemProps.state.description ?? '')
+  assert.match(stateDoc, /started/, 'state 必须说明取值 started')
+  assert.match(stateDoc, /not_started/, 'state 必须说明取值 not_started')
+  assert.match(stateDoc, /settle|落位|when it/i, 'state 必须说明它描述的是落位时的状态,不是当前状态')
 })
