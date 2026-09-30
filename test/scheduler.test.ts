@@ -798,3 +798,116 @@ test('T-129 mergeUsage:多次上报相加;totalTokens 缺省时按 input+output 
     '一侧有 totalTokens -> 另一侧按 input+output 兜底',
   )
 })
+
+// ─── T-137:并发交织(取消/退避/爬坡/迟到回调) ───
+
+test('T-137 取消发生在退避等待中:不再重试,批量立即收尾', async (t) => {
+  useFakeTimers(t)
+  const fake = createFakeLauncher((task) => (task.index === 0 ? { rateLimit: true, ready: true } : 'success'))
+  const controller = new AbortController()
+  const promise = runSwarmBatch(makeTasks(2), fake.launcher, { signal: controller.signal })
+  await flush()
+  assert.deepEqual(fake.starts.filter((s) => s.index === 0).map((s) => s.attempt), [1], '第 1 次尝试已限流,进入退避')
+  controller.abort()
+  await flush()
+  mock.timers.tick(60_000)
+  await flush()
+  const results = await promise
+  assert.deepEqual(fake.starts.filter((s) => s.index === 0).map((s) => s.attempt), [1], '取消后不得再重试')
+  assert.equal(results[0].status, 'aborted')
+})
+
+test('T-137 取消发生在爬坡等待中:未启动的条目判 aborted,且不再放量', async (t) => {
+  useFakeTimers(t)
+  const fake = createFakeLauncher(() => 'success')
+  const controller = new AbortController()
+  const promise = runSwarmBatch(makeTasks(6), fake.launcher, { initialLaunchLimit: 2, signal: controller.signal })
+  await flush()
+  assert.equal(fake.starts.length, 2, '首波只起 2 个')
+  controller.abort()
+  await flush()
+  mock.timers.tick(60_000)
+  await flush()
+  const results = await promise
+  assert.equal(fake.starts.length, 2, '取消后不得再放量')
+  assert.equal(results.length, 6, '每个条目都要有条目结果')
+  assert.equal(results.filter((r) => r.status === 'aborted').length, 4, '未启动的 4 条判 aborted')
+})
+
+test('T-137 全部任务处于限流挂起时取消:不得死锁', async (t) => {
+  useFakeTimers(t)
+  const fake = createFakeLauncher(() => ({ rateLimit: true }))
+  const controller = new AbortController()
+  const promise = runSwarmBatch(makeTasks(2), fake.launcher, { signal: controller.signal })
+  await flush()
+  controller.abort()
+  await flush()
+  const results = await promise
+  assert.equal(results.length, 2)
+  assert.ok(results.every((r) => r.status === 'aborted' || r.status === 'failed'), '取消后不得留下未完成态: ' + results.map((r) => r.status).join(','))
+})
+
+test('T-137 迟到的完成被忽略:取消后到达的 onComplete 不改变结果', async (t) => {
+  useFakeTimers(t)
+  const fake = createFakeLauncher(() => 'manual')
+  const controller = new AbortController()
+  const promise = runSwarmBatch(makeTasks(2), fake.launcher, { signal: controller.signal })
+  await flush()
+  controller.abort()
+  await flush()
+  for (const a of fake.apis) {
+    a.api.onReady()
+    a.api.onComplete({ result: 'late-success' })
+  }
+  await flush()
+  const results = await promise
+  assert.equal(results.filter((r) => r.result === 'late-success').length, 0, '迟到完成不得写入结果')
+  assert.ok(results.every((r) => r.status === 'aborted'), '取消后已落位的条目不得被迟到回调改写')
+})
+
+test('T-137 onItemSettled 经过重试也只回调一次,且是最终结果', async (t) => {
+  useFakeTimers(t)
+  const fake = createFakeLauncher((task, attempt) => (task.index === 0 && attempt === 1 ? { rateLimit: true, ready: true } : 'success'))
+  const settled: Array<{ index: number; status: string }> = []
+  const promise = runSwarmBatch(makeTasks(2), fake.launcher, {
+    onItemSettled: (entry) => settled.push({ index: entry.task.index, status: entry.status }),
+  })
+  await flush()
+  mock.timers.tick(3_000)
+  await flush()
+  const results = await promise
+  assert.equal(results[0].status, 'completed', '重试后成功')
+  assert.deepEqual(settled.filter((s) => s.index === 0), [{ index: 0, status: 'completed' }], 'idx0 只回调一次且为最终结果')
+  assert.equal(settled.length, 2, '两条各回调一次')
+})
+
+test('T-137 超时优先:超时判负后迟到的成功上报不得翻案(批量仍在跑)', async (t) => {
+  useFakeTimers(t)
+  // 自定义 raw launcher:不加 settled 守卫,以便在落位之后**手动**投递迟到回调;
+  // 同时忠实模拟真实执行层——abort 时自己上报 onError(否则任务永远不会落位)。
+  const cbs = new Map<number, AttemptCallbacks>()
+  const launcher: SwarmLauncher = {
+    start(task, cb, signal) {
+      cbs.set(task.index, cb)
+      cb.onReady()
+      if (task.index === 0) {
+        signal.addEventListener('abort', () => cb.onError({ message: 'aborted by timeout' }), { once: true })
+      } else {
+        queueMicrotask(() => cb.onComplete({ result: 'done-1' }))
+      }
+    },
+  }
+  const promise = runSwarmBatch(makeTasks(2, { timeoutMs: 1_000 }), launcher, { initialLaunchLimit: 1 })
+  await flush()
+  mock.timers.tick(1_000) // idx0 超时 → 以 timeout 落位
+  await flush()
+  mock.timers.tick(INITIAL_LAUNCH_INTERVAL_MS) // 放量启动 idx1
+  await flush()
+  cbs.get(0)?.onComplete({ result: 'too-late' }) // 迟到完成(此时批还没结束)
+  await flush()
+  const results = await promise
+  assert.equal(results[0].status, 'failed', '超时判负')
+  assert.equal(results[0].reason, 'timeout', 'reason 必须是 timeout,不能被迟到上报改成别的')
+  assert.notEqual(results[0].result, 'too-late', '迟到完成不得写入结果')
+  assert.equal(results[1].status, 'completed', '同批的 idx1 正常完成')
+})
