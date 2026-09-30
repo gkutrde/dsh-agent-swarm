@@ -134,20 +134,20 @@ export function createSubagentLauncher(options: SubagentLauncherOptions): SwarmL
       case 'completed': {
         const text = textOf(result.output)
         if (text === '') {
-          callbacks.onError({ message: EMPTY_RESULT_MESSAGE, rateLimit: false, ready: true })
+          callbacks.onError({ message: EMPTY_RESULT_MESSAGE, rateLimit: false, ready: true, reason: 'empty-output' })
           return
         }
         callbacks.onComplete({ result: text, stopReason: 'completed' })
         return
       }
       case 'aborted':
-        callbacks.onError({ message: diagnostic ?? SUBAGENT_ABORTED_MESSAGE, rateLimit: false, ready: true })
+        callbacks.onError({ message: diagnostic ?? SUBAGENT_ABORTED_MESSAGE, rateLimit: false, ready: true, reason: 'aborted' })
         return
       case 'max-tokens':
-        callbacks.onError({ message: diagnostic ?? MAX_TOKENS_MESSAGE, rateLimit: false, ready: true })
+        callbacks.onError({ message: diagnostic ?? MAX_TOKENS_MESSAGE, rateLimit: false, ready: true, reason: 'max-tokens' })
         return
       case 'refusal':
-        callbacks.onError({ message: diagnostic ?? SUBAGENT_REFUSAL_MESSAGE, rateLimit: false, ready: true })
+        callbacks.onError({ message: diagnostic ?? SUBAGENT_REFUSAL_MESSAGE, rateLimit: false, ready: true, reason: 'refusal' })
         return
       default:
         callbacks.onError({
@@ -155,6 +155,7 @@ export function createSubagentLauncher(options: SubagentLauncherOptions): SwarmL
           // 路径 B 只有 diagnostic 文本可用:命中限流特征才重排队,否则按普通失败。
           rateLimit: isRetryableFailure(typeof diagnostic === 'string' ? { message: diagnostic } : undefined, codes),
           ready: true,
+          reason: 'failed',
         })
         return
     }
@@ -172,7 +173,7 @@ export function createSubagentLauncher(options: SubagentLauncherOptions): SwarmL
       })
     } catch (error) {
       // 子级尚未发布:ready=false(调度器按重罚处理,若确属限流)。
-      callbacks.onError({ message: messageOf(error), rateLimit: isRetryableFailure(error, codes), ready: false })
+      callbacks.onError({ message: messageOf(error), rateLimit: isRetryableFailure(error, codes), ready: false, reason: 'provider-error' })
       return
     }
     inFlight.set(task.index, run)
@@ -184,7 +185,7 @@ export function createSubagentLauncher(options: SubagentLauncherOptions): SwarmL
       result = await run.result
     } catch (error) {
       release(run)
-      callbacks.onError({ message: messageOf(error), rateLimit: isRetryableFailure(error, codes), ready: true })
+      callbacks.onError({ message: messageOf(error), rateLimit: isRetryableFailure(error, codes), ready: true, reason: 'provider-error' })
       return
     } finally {
       if (inFlight.get(task.index) === run) inFlight.delete(task.index)
@@ -196,7 +197,7 @@ export function createSubagentLauncher(options: SubagentLauncherOptions): SwarmL
     start(task, callbacks, signal) {
       void runAttempt(task, callbacks, signal).catch((error: unknown) => {
         try {
-          callbacks.onError({ message: messageOf(error), rateLimit: false, ready: true })
+          callbacks.onError({ message: messageOf(error), rateLimit: false, ready: true, reason: 'provider-error' })
         } catch {
           /* 调度器已收尾 */
         }

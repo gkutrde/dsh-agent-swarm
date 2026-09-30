@@ -233,3 +233,43 @@ test('P1b agentOptions 透传:新建时带上配置的路由覆盖', async () =>
   await until(() => d.completions.length > 0)
   assert.deepEqual(host.rec.continuable[0].agentOptions, agentOptions)
 })
+
+// ─── T-136:续跑路径必须上报 reason(否则退化成兜底 failed) ───
+
+test('T-136 续跑:轮超时 → reason=timeout(不是兜底 failed)', async () => {
+  const host = fakeHost({ statuses: ['running'], events: [[], []] })
+  const launcher = createContinuableSubagentLauncher({
+    subagents: host.subagents, sessions: host.sessions, agents: host.agents,
+    provider: 'spawn', parent: {}, pollIntervalMs: 1, turnTimeoutMs: 30,
+  })
+  const d = driver()
+  launcher.start(task(0), d.cb, new AbortController().signal)
+  await new Promise<void>((r) => setTimeout(r, 120))
+  assert.equal(d.errors.length, 1)
+  assert.equal((d.errors[0] as { reason?: string }).reason, 'timeout')
+})
+
+test('T-136 续跑:startContinuable 抛错 → reason=provider-error', async () => {
+  const host = fakeHost({ startFails: true })
+  const launcher = createContinuableSubagentLauncher({
+    subagents: host.subagents, sessions: host.sessions, agents: host.agents,
+    provider: 'spawn', parent: {}, pollIntervalMs: 1, turnTimeoutMs: 500,
+  })
+  const d = driver()
+  launcher.start(task(0), d.cb, new AbortController().signal)
+  await flush(); await flush()
+  assert.equal((d.errors[0] as { reason?: string }).reason, 'provider-error')
+})
+
+test('T-136 续跑:空产出 → reason=empty-output', async () => {
+  // 空产出 = 有助手消息但正文为空(没有消息是「轮超时」,不是空产出)。
+  const host = fakeHost({ statuses: ['idle'], events: [[{ type: 'assistant/message', seq: 5, text: '' }]] })
+  const launcher = createContinuableSubagentLauncher({
+    subagents: host.subagents, sessions: host.sessions, agents: host.agents,
+    provider: 'spawn', parent: {}, pollIntervalMs: 1, turnTimeoutMs: 400,
+  })
+  const d = driver()
+  launcher.start(task(0), d.cb, new AbortController().signal)
+  await until(() => d.errors.length > 0)
+  assert.equal((d.errors[0] as { reason?: string }).reason, 'empty-output')
+})

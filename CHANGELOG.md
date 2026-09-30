@@ -10,6 +10,8 @@
 
 ### 修复
 
+- **失败原因只在路径 A 覆盖**：路径 B 与续跑 launcher 的 `onError` 基本不带 `reason`，于是这两条路径的失败会退化成调度器兜底的 `failed`（续跑轮超时本该是 `timeout`）。现三条路径统一上报：`empty-output` / `aborted` / `max-tokens` / `refusal` / `provider-error` / `timeout` / `failed`。
+- **续跑的「空产出」分支是死代码**：会话读取会跳过正文为空的消息且不推进序号，导致该分支永不可达 —— 续跑遇空产出会一直等到轮超时才报 `timeout`（原因误导且白等）。现改为「最新一条助手消息即本轮产出」，空产出即时正确地报 `empty-output`。
 - **对外声明与实现对不齐（三处）**：`prompt_template` 实际必需却未列入 `required`；`reason` 的字段描述只列 6 个取值（实际 9 个，`max-tokens`/`refusal`/`failed` 缺失）；`state` 没有任何说明，导致模型把它误读成「当前状态」（实为「落位时是否启动过：started / not_started」）。现三者均已对齐。
 - **截断可能切碎代理对**：`maxBodyChars` 截断与路径 B 的子会话 `label` 都按 UTF-16 码元截取，若切点落在 emoji 等代理对中间会留下**孤代理**（非法文本，可能污染 JSON/渲染）。现按码点边界回退一位（`sliceAtCodePoint`），截断计数按实际保留长度计算。
 - **参数声明与实现对不齐**：`items` 此前声明为「字符串数组」，而实现自 0.5.0 起支持对象条目 —— 模型只被告知能传字符串，于是**结构化条目对模型不可见**。现用 `oneOf` 同时声明字符串与对象，并在描述里写明字段占位符 `{{item.<key>}}`、内置 `{{index}}`/`{{total}}` 与续跑保留键 `agent`。

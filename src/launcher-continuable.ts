@@ -122,9 +122,9 @@ export function createContinuableSubagentLauncher(options: ContinuableLauncherOp
     let lastSeq = -1
     for (const event of events) {
       if (event?.type !== 'assistant/message') continue
-      const normalized = normalizeAssistantContent(event.data?.message?.content)
-      if (normalized === '') continue
-      text = normalized
+      // 最新一条助手消息就是本轮产出:**正文为空也要记录位置**。
+      // 否则 lastSeq 永不推进 → run() 里的「空产出」分支不可达,空产出会一直等到轮超时并报 timeout(误导,且白等)。
+      text = normalizeAssistantContent(event.data?.message?.content)
       lastSeq = typeof event.seq === 'number' ? event.seq : lastSeq
     }
     return { text, lastSeq }
@@ -169,7 +169,7 @@ export function createContinuableSubagentLauncher(options: ContinuableLauncherOp
         childId = started.childId
       }
     } catch (error) {
-      callbacks.onError({ message: messageOf(error), rateLimit: false, ready: false })
+      callbacks.onError({ message: messageOf(error), rateLimit: false, ready: false, reason: 'provider-error' })
       return
     }
     inFlight.set(task.index, childId)
@@ -179,11 +179,11 @@ export function createContinuableSubagentLauncher(options: ContinuableLauncherOp
     if (inFlight.get(task.index) === childId) inFlight.delete(task.index)
     if (abandoned.has(task.index)) return
     if (text === null) {
-      callbacks.onError({ message: SUBAGENT_TURN_TIMEOUT_MESSAGE, rateLimit: false, ready: true })
+      callbacks.onError({ message: SUBAGENT_TURN_TIMEOUT_MESSAGE, rateLimit: false, ready: true, reason: 'timeout' })
       return
     }
     if (text === '') {
-      callbacks.onError({ message: EMPTY_RESULT_MESSAGE, rateLimit: false, ready: true })
+      callbacks.onError({ message: EMPTY_RESULT_MESSAGE, rateLimit: false, ready: true, reason: 'empty-output' })
       return
     }
     callbacks.onComplete({ result: text, stopReason: 'completed' })
@@ -193,7 +193,7 @@ export function createContinuableSubagentLauncher(options: ContinuableLauncherOp
     start(task, callbacks, signal) {
       void run(task, callbacks, signal).catch((error: unknown) => {
         try {
-          callbacks.onError({ message: messageOf(error), rateLimit: false, ready: true })
+          callbacks.onError({ message: messageOf(error), rateLimit: false, ready: true, reason: 'provider-error' })
         } catch {
           /* 调度器已收尾 */
         }

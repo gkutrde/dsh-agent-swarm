@@ -111,7 +111,7 @@ test('路径 B 限流识别:diagnostic 命中 429 文案 → rateLimit:true 交�
   await flush()
   fake.last().run.finish({ output: [], diagnostic: '429 Too Many Requests', stopReason: 'error' })
   await flush()
-  assert.deepEqual(d.errors[0], { message: '429 Too Many Requests', rateLimit: true, ready: true })
+  assert.deepEqual(d.errors[0], { message: '429 Too Many Requests', rateLimit: true, ready: true, reason: 'failed' })
 })
 
 test('路径 B 取消/超时:stopReason aborted 照常回报(由调度器决定丢弃或改写)', async () => {
@@ -146,7 +146,7 @@ test('路径 B start 抛错 → onError(非限流, ready=false)', async () => {
   const d = driver()
   launcher.start(task(0), d.cb, new AbortController().signal)
   await flush()
-  assert.deepEqual(d.errors[0], { message: 'provider unavailable', rateLimit: false, ready: false })
+  assert.deepEqual(d.errors[0], { message: 'provider unavailable', rateLimit: false, ready: false, reason: 'provider-error' })
   assert.deepEqual(d.events, ['error'])
 })
 
