@@ -22,6 +22,8 @@
 | 批内进度日志 | ⚙️ `progressLog: true` | 每条落位写一行日志 |
 | 跟随会话模型 | ⚙️ `followSessionModel: true` | 子任务用调用方 agent 的 provider/model |
 
+> 架构与改动指南见 [ARCHITECTURE.md](ARCHITECTURE.md)；来源与许可声明见 [THIRD-PARTY-NOTICES.md](THIRD-PARTY-NOTICES.md)。
+
 ## 安装
 
 ### 1. 作为 dsh 插件（headless / 自定义 profile）

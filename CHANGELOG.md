@@ -4,6 +4,10 @@
 
 ## [Unreleased]
 
+### 文档
+
+- **仓库侧溯源与架构（T-144）**：新增 [`THIRD-PARTY-NOTICES.md`](THIRD-PARTY-NOTICES.md)（**未复制任何第三方源码与提示词**的声明、可复核的核对方法、依赖与许可、与同类实现互不派生的登记）与 [`ARCHITECTURE.md`](ARCHITECTURE.md)（模块职责、调度常量、两条执行路径与判定流程、对外面同步要求、质量门禁、已知边界）。两份文档随包分发（`files` 与 `pack:check` 均已纳入断言）。
+
 ### 新增
 
 - **bundle 安装契约与守卫（T-142）**：确认并文档化「一条命令安装」——`dsh plugin --profile <name> add <路径|git|tarball>` 会写依赖 + 追加 `dsh.profile.bundles`（自指 bundle），组合配置里出现 `# == dsh-agent-swarm` 层；停用/卸载方式与自证命令写进 README。新增 `test/packaging.test.ts` 钉住契约（`cordis.patch.yml` 自指 insert、`files`/`exports` 覆盖、`prepublishOnly` 门禁、id 不重复）。

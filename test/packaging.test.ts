@@ -28,7 +28,8 @@ test('T-142 package.json 暴露构建入口与补丁文件(bundle 安装契约)'
   assert.equal(pkg.main, 'lib/index.js')
   assert.equal(pkg.exports?.['.'], './lib/index.js')
   assert.equal(pkg.exports?.['./cordis.patch.yml'], './cordis.patch.yml', '补丁层必须可被消费方解析')
-  for (const entry of ['lib', 'cordis.patch.yml', 'README.md', 'LICENSE', 'CHANGELOG.md', 'skills']) {
+  // T-144:溯源与架构文档也必须随包分发(消费者要在包里看到来源声明)
+  for (const entry of ['lib', 'cordis.patch.yml', 'README.md', 'LICENSE', 'CHANGELOG.md', 'skills', 'ARCHITECTURE.md', 'THIRD-PARTY-NOTICES.md']) {
     assert.ok(pkg.files?.includes(entry), '打包清单必须包含 ' + entry)
   }
 })

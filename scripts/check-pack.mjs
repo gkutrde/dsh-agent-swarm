@@ -13,6 +13,9 @@ const REQUIRED = [
   'package/README.md',
   'package/LICENSE',
   'package/CHANGELOG.md',
+  // T-144:溯源与架构文档也要在包里(使用者应能在包内看到来源声明)
+  'package/ARCHITECTURE.md',
+  'package/THIRD-PARTY-NOTICES.md',
   'package/cordis.patch.yml',
   'package/skills/swarm-then-team/SKILL.md',
 ]
