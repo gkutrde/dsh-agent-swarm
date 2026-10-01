@@ -65,14 +65,23 @@ agent_swarm({
 // 模板还支持内置变量:{{index}}(1-based 序位)、{{total}}(条目总数)
 })
 
-# ③ 路径 B：子任务带工具（需 subagentProvider: spawn）
+# ③ 批次级模型路由（T-140）：只对这一次调用生效
+agent_swarm({
+  description: '审查',
+  prompt_template: '只回答 {{item}} 的风险等级(高/中/低)',
+  items: ['a.ts', 'b.ts'],
+  provider: 'kimi-coding',   // 可选：覆盖本批次的 provider
+  model: 'k3'                // 可选：覆盖本批次的 model
+})
+
+# ④ 路径 B：子任务带工具（需 subagentProvider: spawn）
 agent_swarm({
   description: '读码',
   prompt_template: '用文件工具打开 {{item}},只回答它第一条 export const 的名字',
   items: ['src/a.ts', 'src/b.ts']
 })
 
-# ④ 续跑（需 subagentProvider + resumeEnabled）
+# ⑤ 续跑（需 subagentProvider + resumeEnabled）
 #   上一轮汇总里每条都带 agent=<子会话 id>
 agent_swarm({
   description: '继续',

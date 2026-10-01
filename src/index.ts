@@ -109,7 +109,8 @@ export function apply(ctx: Context, config: Config): void {
   const subagents = (ctx as { get?: (name: string) => unknown }).get?.('subagents') as SubagentServiceLike | undefined
   ctx.effect(() => {
     const tool = createAgentSwarmTool({
-      createLauncher: (exec, hint) => {
+      createLauncher: (exec, request) => {
+        const hint = request?.hint
         // 路径 B 的服务必须在**调用点**从 agent 作用域解析(插件自身 ctx 看不到兄弟作用域注册的服务)。
         const subagentService = resolveSubagentService(exec.agent, subagents)
         const configured = (config.subagentProvider ?? '').trim()
@@ -129,11 +130,13 @@ export function apply(ctx: Context, config: Config): void {
           : (useSubagent ? 'configured:subagentProvider' : 'default:llm')
         // 跟随会话模型:只有显式开启才覆盖 Config 的 provider/model。
         const sessionRoute = config.followSessionModel === true ? resolveAgentRoute(exec.agent) : undefined
-        const provider = sessionRoute?.provider ?? config.provider
-        const model = sessionRoute?.model ?? config.model
+        // T-140 优先级:批次参数 > followSessionModel > 配置。
+        const provider = request?.provider ?? sessionRoute?.provider ?? config.provider
+        const model = request?.model ?? sessionRoute?.model ?? config.model
         // 路径 B 的路由覆盖:显式开关才传(默认继承父 agent 路由;提供方不支持该能力时会以失败回报)。
+        const perCallRoute = request?.provider !== undefined || request?.model !== undefined
         const agentOptions =
-          config.subagentAgentOptions === true
+          config.subagentAgentOptions === true || perCallRoute
             ? { provider, model, ...(config.maxTokens === undefined ? {} : { maxTokens: config.maxTokens }) }
             : undefined
         const turnTimeoutMs = config.subagentTurnTimeoutMs ?? config.timeoutMs

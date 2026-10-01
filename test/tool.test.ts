@@ -218,7 +218,8 @@ test('工具契约:名称/描述/参数 JSON Schema(宿主子集)/输出投影/�
   assert.equal(AGENT_SWARM_PARAMETERS.type, 'object')
   assert.deepEqual(AGENT_SWARM_PARAMETERS.required, ['description', 'prompt_template', 'items'], 'prompt_template 缺失即抛错,必须是 required')
   const properties = AGENT_SWARM_PARAMETERS.properties as Record<string, { type: string; items?: { oneOf?: Array<{ type?: string }> } }>
-  assert.deepEqual(Object.keys(properties).sort(), ['description', 'items', 'prompt_template'])
+  // T-140 起参数多了批次级路由 provider/model(有意变更)。
+  assert.deepEqual(Object.keys(properties).sort(), ['description', 'items', 'model', 'prompt_template', 'provider'])
   assert.equal(properties.description.type, 'string')
   assert.equal(properties.items.type, 'array')
   // T-132:元素形态用 oneOf 声明(字符串或对象),实现支持两者,声明也必须如此。

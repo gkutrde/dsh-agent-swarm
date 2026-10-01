@@ -215,3 +215,18 @@ test('T-126 零回归:不含内置变量的模板展开逐字不变', () => {
   assert.equal(specs[0].prompt, '看 a')
   assert.equal(specs[1].prompt, '看 b')
 })
+
+// ─── T-140:per-call 模型路由参数(批次级指定) ───
+
+test('T-140 批次参数可带 provider/model(逐字保留)', () => {
+  const specs = createSwarmSpecs({ ...NORMAL, provider: 'kimi-coding', model: 'k3' } as never)
+  assert.equal(specs.length, 3)
+  // 路由属于批次级信息:由调用方(工具层)读取,不落到每条 spec 上
+  assert.equal((specs as unknown as { route?: unknown }).route, undefined)
+})
+
+test('T-140 非法 model/provider 前置拒绝(零子任务启动)', () => {
+  assert.throws(() => createSwarmSpecs({ ...NORMAL, model: '' } as never), /model must be a non-empty string/)
+  assert.throws(() => createSwarmSpecs({ ...NORMAL, model: 123 } as never), /model must be a non-empty string/)
+  assert.throws(() => createSwarmSpecs({ ...NORMAL, provider: '   ' } as never), /provider must be a non-empty string/)
+})

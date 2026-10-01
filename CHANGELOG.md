@@ -2,6 +2,12 @@
 
 本项目遵循 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/) 与 [语义化版本](https://semver.org/lang/zh-CN/)。
 
+## [Unreleased]
+
+### 新增
+
+- **批次级模型路由（T-140）**：`agent_swarm` 新增可选参数 `provider` / `model`，**只对本次调用生效**。优先级：**批次参数 > `followSessionModel` > Config**。路径 A 直接用它发请求；路径 B 把它作为宿主 `AgentOptions` 传给子代理（无需再开 `subagentAgentOptions`）。非法值（空串/非字符串）在前置校验阶段拒绝，零子任务启动。
+
 ## [0.5.3] - 2026-09-30
 
 ### 新增

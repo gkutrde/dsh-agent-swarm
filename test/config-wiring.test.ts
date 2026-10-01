@@ -320,3 +320,32 @@ test('T-139 旧行为不回归:空=固定 A,显式提供方名=固定 B', async 
   assert.equal(rb.path, 'subagent', '显式 spawn 必须仍是 B(即使模板不需要工具)')
   assert.equal(b.starts[0]?.provider, 'spawn', '显式值必须原样传给宿主')
 })
+
+// ─── T-140:per-call 模型路由(批次参数 > 配置) ───
+
+test('T-140 批次参数 model/provider 覆盖配置(路径 A 的 llm.stream 收到该值)', async () => {
+  const seen: Array<{ provider?: string; model?: string }> = []
+  const definitions: Array<{ execute: (a: unknown, e: unknown) => Promise<{ path?: string }> }> = []
+  const ctx = {
+    effect: (fn: () => unknown) => fn(),
+    logger: { info: () => undefined },
+    tools: { register: (d: unknown) => { definitions.push(d as never); return () => undefined } },
+    llm: {
+      stream(request: { provider?: string; model?: string }) {
+        seen.push({ provider: request?.provider, model: request?.model })
+        return (async function* () {
+          yield { type: 'text-delta', index: 0, text: 'ok' }
+          yield { type: 'finish', reason: { kind: 'stop' } }
+        })()
+      },
+    },
+    get: () => undefined,
+  }
+  apply(ctx as never, Config({ provider: 'deepseek-official', model: 'deepseek-flash' }) as never)
+  await definitions[0].execute(
+    { description: 'percall', prompt_template: '只回答 {{item}}', items: ['甲', '乙'], provider: 'kimi-coding', model: 'k3' },
+    { signal: new AbortController().signal, agent: undefined },
+  )
+  assert.equal(seen.length, 2, '两条各一次调用')
+  assert.deepEqual(seen[0], { provider: 'kimi-coding', model: 'k3' }, '批次参数必须覆盖配置')
+})

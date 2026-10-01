@@ -50,6 +50,10 @@ export interface SwarmArgs {
   description: string
   prompt_template?: string
   items: SwarmItem[]
+  /** T-140:批次级模型路由(可选)。优先级:批次参数 > followSessionModel > 配置。 */
+  provider?: string
+  /** T-140:批次级模型(可选)。 */
+  model?: string
 }
 
 export interface SwarmSpec {
@@ -108,6 +112,14 @@ function expandItem(template: string, item: SwarmItem, index: number, total: num
   return expanded.split(ITEM_PLACEHOLDER).join(JSON.stringify(item))
 }
 
+/** T-140:批次级路由字段校验(可选;给了就必须是非空字符串)。 */
+function assertRouteField(value: unknown, name: 'provider' | 'model'): void {
+  if (value === undefined) return
+  if (typeof value !== 'string' || value.trim() === '') {
+    throw new Error(`agent_swarm ${name} must be a non-empty string.`)
+  }
+}
+
 export function createSwarmSpecs(args: SwarmArgs, options: SwarmSpecOptions = {}): SwarmSpec[] {
   const items = args.items
   // 校验顺序固定(①→⑦),全部先于任何 specs 生成。
@@ -124,6 +136,9 @@ export function createSwarmSpecs(args: SwarmArgs, options: SwarmSpecOptions = {}
     }
     assertValidItemObject(item, index + 1)
   }
+  // ⑦(新增 T-140) 批次级路由参数:先于任何 specs 生成拒绝非法值(零子任务启动)。
+  assertRouteField(args.provider, 'provider')
+  assertRouteField(args.model, 'model')
   const template = args.prompt_template
   if (!template) throw new Error(ERRORS.missingTemplate)
   // 占位符:{{item}} 或任一 {{item.<key>}} 都算合法(对象条目常只用字段占位符)。

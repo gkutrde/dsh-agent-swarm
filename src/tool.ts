@@ -72,6 +72,9 @@ export const AGENT_SWARM_PARAMETERS: AgentSwarmJsonSchemaNode = {
       type: 'string',
       description: 'Short label for the whole batch; it labels every subagent of this call.',
     },
+    // T-140:批次级模型路由(可选;覆盖 Config 与 followSessionModel)。
+    provider: { type: 'string', description: 'Optional per-call provider for THIS batch (overrides Config and followSessionModel). Path B passes it to the host subagent as AgentOptions when supported.' },
+    model: { type: 'string', description: 'Optional per-call model id for THIS batch (overrides Config and followSessionModel).' },
     prompt_template: {
       type: 'string',
       description:
@@ -197,6 +200,17 @@ export interface AgentSwarmToolDefinition {
   execute(args: unknown, exec: AgentSwarmExecContext): Promise<SwarmValue>
 }
 
+/** 传给执行层工厂的请求信息:T-139 的路径提示 + T-140 的批次级路由。 */
+export interface LauncherRequest {
+  /** 本次调用看起来是否需要工具的判定提示(T-139)。
+   * 不写「路径」二字以免与 config.subagentProvider 的 auto 冲突。 */
+  hint?: PathHint
+  /** 批次级 provider(T-140;已过前置校验)。 */
+  provider?: string
+  /** 批次级 model(T-140;已过前置校验)。 */
+  model?: string
+}
+
 /** 执行层选择结果:launcher + 本次实际路径(T-139)。旧的「只返回 launcher」写法仍然兼容。 */
 export interface LauncherSelection {
   launcher: SwarmLauncher
@@ -207,7 +221,7 @@ export interface LauncherSelection {
 export interface AgentSwarmToolDeps {
   /** 每批新建一个 launcher(生产实现 = createLlmLauncher / createSubagentLauncher;测试注入假 launcher)。
    * 接收工具执行上下文:路径 B 需要 `exec.agent` 作为 `parent`。 */
-  createLauncher: (context: AgentSwarmExecContext, hint?: PathHint) => SwarmLauncher | LauncherSelection
+  createLauncher: (context: AgentSwarmExecContext, request?: LauncherRequest) => SwarmLauncher | LauncherSelection
   /** 并发硬上限;缺省不限制。 */
   maxConcurrency?: number
   /** 单子任务超时(ms),0 = 不设任务级超时。 */
@@ -250,7 +264,7 @@ function parseArgs(args: unknown): SwarmArgs {
     throw new Error('agent_swarm arguments must be an object.')
   }
   const record = args as Record<string, unknown>
-  const { description, prompt_template: template, items } = record
+  const { description, prompt_template: template, items, provider, model } = record
   if (typeof description !== 'string' || description.trim() === '') {
     throw new Error('agent_swarm requires a non-empty description.')
   }
@@ -264,6 +278,9 @@ function parseArgs(args: unknown): SwarmArgs {
     description,
     ...(template === undefined ? {} : { prompt_template: template }),
     items: [...(items as SwarmItem[])],
+    // T-140:批次级路由(类型/非空校验在 createSwarmSpecs 里按固定顺序做)。
+    ...(provider === undefined ? {} : { provider: provider as string }),
+    ...(model === undefined ? {} : { model: model as string }),
   }
 }
 
@@ -308,7 +325,11 @@ export function createAgentSwarmTool(deps: AgentSwarmToolDeps): AgentSwarmToolDe
       let launcher: SwarmLauncher
       let selection: { path?: 'llm' | 'subagent'; pathReason?: string } = {}
       try {
-        const created = deps.createLauncher(exec ?? {}, hint)
+        const created = deps.createLauncher(exec ?? {}, {
+          hint,
+          ...(parsed.provider === undefined ? {} : { provider: parsed.provider }),
+          ...(parsed.model === undefined ? {} : { model: parsed.model }),
+        })
         if (created !== null && typeof created === 'object' && 'launcher' in (created as object)) {
           const picked = created as LauncherSelection
           launcher = picked.launcher
