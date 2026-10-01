@@ -242,6 +242,8 @@ export interface AgentSwarmToolDeps {
   onItemSettled?: (result: SwarmResultEntry) => void
   /** 开跑钩子(T-127):**校验通过、零子任务启动**时回调一次,用于写「开跑预检」日志。 */
   onBatchStart?: (info: {
+    /** 批次标签(T-141:注册表用它标识批次)。 */
+    description?: string
     count: number
     rampLimit?: number
     rampIntervalMs?: number
@@ -250,8 +252,20 @@ export interface AgentSwarmToolDeps {
     path?: 'llm' | 'subagent'
     pathReason?: string
   }) => void
+  /** 批次结束钩子(T-141):注册表用它把批次归档。异常不得影响批处理。 */
+  onBatchEnd?: (info: { counts?: { completed: number; failed: number; aborted: number }; failed?: boolean }) => void
   /** 覆盖工具描述(按执行路径生成,见 agentSwarmDescription)。缺省 = 路径 A 文案。 */
   description?: string
+}
+
+/** T-141:批次结束钩子的安全调用(注册表失败绝不能影响批处理)。 */
+function callBatchEnd(deps: AgentSwarmToolDeps, info: { counts?: { completed: number; failed: number; aborted: number }; failed?: boolean }): void {
+  if (deps.onBatchEnd === undefined) return
+  try {
+    deps.onBatchEnd(info)
+  } catch {
+    /* 观测面失败不影响批 */
+  }
 }
 
 function cleanError(error: unknown): Error {
@@ -354,6 +368,7 @@ export function createAgentSwarmTool(deps: AgentSwarmToolDeps): AgentSwarmToolDe
 
       // 到这里:前置校验已过、launcher 已建好、**还没有任何子任务启动** —— 正是写开跑预检的时机。
       deps.onBatchStart?.({
+        description: parsed.description,
         count: tasks.length,
         ...(deps.rampLimit === undefined ? {} : { rampLimit: deps.rampLimit }),
         ...(deps.rampIntervalMs === undefined ? {} : { rampIntervalMs: deps.rampIntervalMs }),
@@ -370,6 +385,15 @@ export function createAgentSwarmTool(deps: AgentSwarmToolDeps): AgentSwarmToolDe
           ...(deps.onItemSettled === undefined ? {} : { onItemSettled: deps.onItemSettled }),
           ...(exec?.signal === undefined ? {} : { signal: exec.signal }),
         })
+        callBatchEnd(deps, {
+          counts: results.reduce(
+            (acc, result) => {
+              acc[result.status] += 1
+              return acc
+            },
+            { completed: 0, failed: 0, aborted: 0 },
+          ),
+        })
         const text = renderSwarmResults(results, {
           ...(deps.maxBodyChars === undefined ? {} : { maxBodyChars: deps.maxBodyChars }),
         })
@@ -378,6 +402,7 @@ export function createAgentSwarmTool(deps: AgentSwarmToolDeps): AgentSwarmToolDe
           ...selection,
         })
       } catch (error) {
+        callBatchEnd(deps, { failed: true })
         throw cleanError(error)
       }
     },

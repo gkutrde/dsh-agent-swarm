@@ -17,6 +17,7 @@ import {
   type SessionQueryLike,
 } from './launcher-continuable.ts'
 import { formatResultLine } from './render.ts'
+import { SwarmRegistry } from './registry.ts'
 import { agentSwarmDescription, createAgentSwarmTool } from './tool.ts'
 
 export const name = 'dsh-agent-swarm'
@@ -55,6 +56,8 @@ export interface Config {
   systemPrompt?: string
   /** Log each settled subtask as it finishes (long batches become observable). Default off. */
   progressLog?: boolean
+  /** T-141: how many finished batches the status registry keeps (default 5). */
+  registryHistoryLimit?: number
   /** Path B: run subtasks as host subagents through this provider name (e.g. 'spawn'). Absent = path A (one-shot LLM). */
   subagentProvider?: string
   /** Let subtasks follow the calling agent's own provider/model instead of the plugin Config. Default off. */
@@ -87,6 +90,8 @@ export const Config = z.object({
   toolTimeoutMs: z.number().min(1),
   systemPrompt: z.string(),
   progressLog: z.boolean().default(false),
+  /** T-141:批次状态注册表保留的历史批次数(默认 5)。 */
+  registryHistoryLimit: z.natural().default(5),
   subagentProvider: z.string(),
   followSessionModel: z.boolean().default(false),
   resumeEnabled: z.boolean().default(false),
@@ -94,6 +99,20 @@ export const Config = z.object({
   subagentTurnTimeoutMs: z.number().min(0),
   subagentPollIntervalMs: z.number().min(1),
 })
+
+/**
+ * 把服务暴露给宿主(T-141)。
+ * 必须**安全访问**:cordis 对未声明属性会抛错(Proxy 守卫用例覆盖),宿主版本差异也可能没有 provide。
+ * 暴露失败只意味着别的插件查不到注册表,绝不影响本插件装载与批处理。
+ */
+function provideService(ctx: unknown, name: string, value: unknown): void {
+  try {
+    const provide = (ctx as { provide?: (serviceName: string, serviceValue: unknown) => unknown } | undefined)?.provide
+    if (typeof provide === 'function') provide.call(ctx, name, value)
+  } catch {
+    /* 宿主不提供该能力:静默降级 */
+  }
+}
 
 /** 宿主注入的服务(结构化声明,不 import \`@deepseek-ai/*\`)。 */
 interface SwarmServices {
@@ -107,7 +126,12 @@ export function apply(ctx: Context, config: Config): void {
   // `cannot get property "subagents" without inject`(实测踩到)。用 ctx.get() 做可选查找,
   // 这样未启用路径 B 的 profile 不因缺该服务而装载失败。
   const subagents = (ctx as { get?: (name: string) => unknown }).get?.('subagents') as SubagentServiceLike | undefined
+  // T-141:批次状态注册表 —— 暴露成宿主服务,供其它插件/UI 查询(纯内存、有界)。
+  const registry = new SwarmRegistry({
+    ...(config.registryHistoryLimit === undefined ? {} : { historyLimit: config.registryHistoryLimit }),
+  })
   ctx.effect(() => {
+    provideService(ctx, 'agentSwarmRegistry', registry)
     const tool = createAgentSwarmTool({
       createLauncher: (exec, request) => {
         const hint = request?.hint
@@ -188,29 +212,73 @@ export function apply(ctx: Context, config: Config): void {
       ...(config.maxAttempts === undefined ? {} : { maxAttempts: config.maxAttempts }),
       ...(config.backoffJitterMs === undefined ? {} : { rateLimitBackoffJitterMs: config.backoffJitterMs }),
       ...(config.toolTimeoutMs === undefined ? {} : { toolTimeoutMs: config.toolTimeoutMs }),
-      ...(config.progressLog === true
-        ? {
-            onBatchStart: (info: { count: number; rampLimit?: number; rampIntervalMs?: number; timeoutMs: number }) => {
-              ctx.logger?.info?.(
-                `[dsh-agent-swarm] starting ${info.count} subtasks (first wave ${info.rampLimit ?? 5}, +1 every ${info.rampIntervalMs ?? 700}ms, per-task timeout ${info.timeoutMs}ms)`,
-                { count: info.count, rampLimit: info.rampLimit, rampIntervalMs: info.rampIntervalMs, timeoutMs: info.timeoutMs },
-              )
-            },
-            onItemSettled: (entry: unknown) => {
-              const settled = entry as { task: { index: number; resumeAgentId?: string }; status: string; state: string; attempts?: number; throttled?: boolean; elapsedMs?: number; agentId?: string }
-              ctx.logger?.info?.('[dsh-agent-swarm] ' + formatResultLine(settled as never), {
-                index: settled.task.index,
-                outcome: settled.status,
-                state: settled.state,
-                ...(settled.attempts === undefined ? {} : { attempts: settled.attempts }),
-                ...(settled.throttled === true ? { throttled: true } : {}),
-                ...(settled.elapsedMs === undefined ? {} : { elapsedMs: settled.elapsedMs }),
-                ...(settled.agentId === undefined ? {} : { agentId: settled.agentId }),
-                ...(settled.task.resumeAgentId === undefined ? {} : { resumed: true }),
-              })
-            },
-          }
-        : {}),
+      // 观测接线(T-141 注册表随时喂;progressLog 开时在**同一个钩子**里再写日志 —— 分成两个同名键会互相覆盖,踩过)。
+      onBatchStart: (info: {
+        description?: string
+        count: number
+        rampLimit?: number
+        rampIntervalMs?: number
+        timeoutMs: number
+        path?: 'llm' | 'subagent'
+      }) => {
+        try {
+          registry.begin({
+            description: info.description ?? '',
+            ...(info.path === undefined ? {} : { path: info.path }),
+            count: info.count,
+          })
+        } catch {
+          /* 观测面失败不影响批 */
+        }
+        if (config.progressLog !== true) return
+        ctx.logger?.info?.(
+          `[dsh-agent-swarm] starting ${info.count} subtasks (first wave ${info.rampLimit ?? 5}, +1 every ${info.rampIntervalMs ?? 700}ms, per-task timeout ${info.timeoutMs}ms)`,
+          { count: info.count, rampLimit: info.rampLimit, rampIntervalMs: info.rampIntervalMs, timeoutMs: info.timeoutMs },
+        )
+      },
+      onItemSettled: (entry: unknown) => {
+        const settled = entry as {
+          task: { index: number; item: string; resumeAgentId?: string }
+          status: string
+          state: string
+          reason?: string
+          agentId?: string
+          elapsedMs?: number
+          attempts?: number
+          throttled?: boolean
+        }
+        try {
+          registry.settle({
+            index: settled.task.index,
+            item: String(settled.task.item),
+            state: settled.state,
+            outcome: settled.status,
+            ...(settled.reason === undefined ? {} : { reason: settled.reason }),
+            ...(settled.agentId === undefined ? {} : { agentId: settled.agentId }),
+            ...(settled.elapsedMs === undefined ? {} : { elapsedMs: settled.elapsedMs }),
+          })
+        } catch {
+          /* 观测面失败不影响批 */
+        }
+        if (config.progressLog !== true) return
+        ctx.logger?.info?.('[dsh-agent-swarm] ' + formatResultLine(settled as never), {
+          index: settled.task.index,
+          outcome: settled.status,
+          state: settled.state,
+          ...(settled.attempts === undefined ? {} : { attempts: settled.attempts }),
+          ...(settled.throttled === true ? { throttled: true } : {}),
+          ...(settled.elapsedMs === undefined ? {} : { elapsedMs: settled.elapsedMs }),
+          ...(settled.agentId === undefined ? {} : { agentId: settled.agentId }),
+          ...(settled.task.resumeAgentId === undefined ? {} : { resumed: true }),
+        })
+      },
+      onBatchEnd: () => {
+        try {
+          registry.finish({})
+        } catch {
+          /* 观测面失败不影响批 */
+        }
+      },
       description: agentSwarmDescription({
         // auto:描述说明「路由是自动的」;显式提供方名:描述切到路径 B 文案(逐字不变)。
         subagent: !((config.subagentProvider ?? '').trim().toLowerCase() === 'auto') && (config.subagentProvider ?? '').trim() !== '',

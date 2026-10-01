@@ -121,6 +121,7 @@ agent_swarm: 2 items — completed: 2
 | `toolTimeoutMs` | 4h | 批级调用上限 |
 | `systemPrompt` | 内置 | 子任务 system 提示 |
 | `progressLog` | false | 每条落位写一行进度日志 |
+| `registryHistoryLimit` | 5 | **T-141** 批次状态注册表保留的历史批次数 |
 | `subagentProvider` | 空 | 空 = 固定**路径 A**；`spawn` / `fork` = 固定**路径 B**；**`auto` = 每次调用自动判断**（需要工具走 B，否则 A，判定依据见下方「路径 A / B」）|
 | `followSessionModel` | false | 子任务跟随调用方 agent 的 provider/model |
 | `resumeEnabled` | false | 路径 B 且为真：子级可续（条目用 `agent` 键接力） |
@@ -153,6 +154,20 @@ mkdir -p ~/.dsh/skills && cp -r skills/swarm-then-team ~/.dsh/skills/
 ```
 
 （该目录被监视，新 skill 无需重启即生效。）
+
+## 宿主服务（可查询批次状态）
+
+插件会把批次状态**以宿主服务形式暴露**，供其它插件/UI 查询：
+
+```ts
+// 服务名:agentSwarmRegistry
+ctx.get('agentSwarmRegistry')  // => { current(), list(), get(id) }
+```
+
+- `current()`：正在跑的批次（含 `description` / `path` / `counts` / 逐条 `items`）
+- `list()`：历史批次（newest first，默认保留 5 个，可配 `registryHistoryLimit`）
+- `get(id)`：按批次 id 查
+- 纯内存、有界；**注册表自身异常绝不影响批处理**（宿主不提供 `provide` 时静默降级）
 
 ## 已知边界
 

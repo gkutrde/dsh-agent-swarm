@@ -349,3 +349,40 @@ test('T-140 批次参数 model/provider 覆盖配置(路径 A 的 llm.stream 收
   assert.equal(seen.length, 2, '两条各一次调用')
   assert.deepEqual(seen[0], { provider: 'kimi-coding', model: 'k3' }, '批次参数必须覆盖配置')
 })
+
+// ─── T-141:批次状态注册表以宿主服务形式暴露,并被批次数据喂满 ───
+
+test('T-141 注册表服务被暴露,且批次结束后可查到该批次(counts/items/description)', async () => {
+  const definitions: Array<{ execute: (a: unknown, e: unknown) => Promise<{ counts?: unknown }> }> = []
+  const provided = new Map<string, unknown>()
+  const ctx = {
+    effect: (fn: () => unknown) => fn(),
+    logger: { info: () => undefined },
+    tools: { register: (d: unknown) => { definitions.push(d as never); return () => undefined } },
+    llm: {
+      stream() {
+        return (async function* () {
+          yield { type: 'text-delta', index: 0, text: 'ok' }
+          yield { type: 'finish', reason: { kind: 'stop' } }
+        })()
+      },
+    },
+    provide: (name: string, value: unknown) => { provided.set(name, value); return undefined },
+    get: () => undefined,
+  }
+  apply(ctx as never, Config({}) as never)
+  const registry = provided.get('agentSwarmRegistry') as {
+    list: () => Array<{ description: string; declaredCount: number; counts: { completed: number }; items: unknown[] }>
+  }
+  assert.ok(registry !== undefined, '必须通过 ctx.provide 暴露 agentSwarmRegistry')
+  await definitions[0].execute(
+    { description: '注册表批', prompt_template: '只回答 {{item}}', items: ['甲', '乙'] },
+    { signal: new AbortController().signal, agent: undefined },
+  )
+  const batches = registry.list()
+  assert.equal(batches.length, 1, '批次结束后应进历史')
+  assert.equal(batches[0].description, '注册表批')
+  assert.equal(batches[0].declaredCount, 2)
+  assert.equal(batches[0].counts.completed, 2)
+  assert.equal(batches[0].items.length, 2)
+})
