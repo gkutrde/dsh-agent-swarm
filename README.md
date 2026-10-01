@@ -33,6 +33,13 @@ pnpm install && pnpm build        # lib/ 已随仓库提交，可跳过;改源�
 dsh plugin --profile <profile> add .
 ```
 
+这一条命令做的事（实测确认）：把本包以 `link:`（本地路径）或版本（git/npm）写进该 profile 的 `dependencies`，**并追加到 `dsh.profile.bundles`** —— 也就是以**自指 bundle** 形态挂载。之后：
+
+- **可见**：`dsh --profile <profile> --dump-config` 里会出现 `# == dsh-agent-swarm` 层与 `- id: agent-swarm`；桌面端在「插件」页可见（清单由宿主的 `pluginInventory` 服务提供）。
+- **停用**：在 profile 的 `cordis.patch.yml` 里写 `- id: agent-swarm` + `disabled: true`（组合配置随之标记停用）。
+- **卸载**：`dsh plugin --profile <profile> remove dsh-agent-swarm`（条目从组合配置里消失）。
+- **自证**：`dsh plugin --profile <profile> add .` → `dsh --profile <profile> --dump-config | findstr agent-swarm` 能看到条目即装好；`remove` 后再查应为空。
+
 或者只把 bundle 层挂上（不改 profile 文件）：
 
 ```bash

@@ -6,6 +6,8 @@
 
 ### 新增
 
+- **bundle 安装契约与守卫（T-142）**：确认并文档化「一条命令安装」——`dsh plugin --profile <name> add <路径|git|tarball>` 会写依赖 + 追加 `dsh.profile.bundles`（自指 bundle），组合配置里出现 `# == dsh-agent-swarm` 层；停用/卸载方式与自证命令写进 README。新增 `test/packaging.test.ts` 钉住契约（`cordis.patch.yml` 自指 insert、`files`/`exports` 覆盖、`prepublishOnly` 门禁、id 不重复）。
+
 - **批次状态注册表（T-141）**：以宿主服务 `agentSwarmRegistry` 暴露「正在跑的批次 / 最近完成的批次」（`current()` / `list()` / `get(id)`），含 `description`、实际 `path`、`counts` 与逐条 `items`（outcome/reason/agentId/elapsedMs）。纯内存、有界（`registryHistoryLimit`，默认 5）；**注册表异常不影响批处理**，宿主无 `provide` 时静默降级。
 
 - **批次级模型路由（T-140）**：`agent_swarm` 新增可选参数 `provider` / `model`，**只对本次调用生效**。优先级：**批次参数 > `followSessionModel` > Config**。路径 A 直接用它发请求；路径 B 把它作为宿主 `AgentOptions` 传给子代理（无需再开 `subagentAgentOptions`）。非法值（空串/非字符串）在前置校验阶段拒绝，零子任务启动。
